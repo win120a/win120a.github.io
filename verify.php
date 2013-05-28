@@ -8,6 +8,6 @@ if(location.search != versign){
   history.back();
 }
 else{
-  location.href = 'i2.html'
+  location.href = 'index2.html'
 }
 </script>
