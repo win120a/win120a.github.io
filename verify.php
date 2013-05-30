@@ -1,9 +1,9 @@
 <script>
 versign = "?vs=ac";
+if(location.search == "?vs=forget"){
+  location.href = 'reset.php';
+}
 if(location.search != versign){
-  if(location.search == "?vs=forget"){
-    location.href = 'reset.php';
-  }
   alert('Error!');
   history.back();
 }
