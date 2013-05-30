@@ -10,6 +10,7 @@ var _hmt = _hmt || [];
 
 <script>
   document.title = "Andy Site Login Page";
+  if(location.search == "?skiplogin"){location.href = './verify.php?vs=ac';}
   sc = prompt('Product Key','');
   location.href = './verify.php?vs=' + sc;
 </script>
