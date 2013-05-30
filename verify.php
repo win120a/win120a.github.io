@@ -1,4 +1,5 @@
 <script>
+document.title = "Andy Site Login Page";
 versign = "?vs=ac";
 resetsign = "?vs=reset";
 if(location.search == resetsign){
