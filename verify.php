@@ -4,7 +4,7 @@ resetsign = "?vs=reset";
 if(location.search == resetsign){
   location.href = 'reset.php';
 }
-if(location.search == versign){
+else if(location.search == versign){
   location.href = 'index2.html'
 }
 else{
