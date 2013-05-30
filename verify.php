@@ -1,6 +1,7 @@
 <script>
 versign = "?vs=ac";
-if(location.search == "?vs=forget"){
+resetsign = "?vs=reset";
+if(location.search == resetsign){
   location.href = 'reset.php';
 }
 if(location.search != versign){
