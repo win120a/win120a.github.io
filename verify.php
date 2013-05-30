@@ -4,11 +4,11 @@ resetsign = "?vs=reset";
 if(location.search == resetsign){
   location.href = 'reset.php';
 }
-if(location.search != versign){
-  alert('Error!');
-  history.back();
+if(location.search == versign){
+  location.href = 'index2.html'
 }
 else{
-  location.href = 'index2.html'
+  alert('Error!');
+  history.back();
 }
 </script>
