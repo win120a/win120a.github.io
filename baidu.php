@@ -1,4 +1,3 @@
-
 <script language="javascript">
 function gowhere1(formname) {
 var url;
@@ -83,10 +82,10 @@ Music
 BBS
 </font>
 
-<input type="radio" value="0" onclick="javascript:this.form.myselectvalue.value=5;" name="myselect">
+<!-- <input type="radio" value="0" onclick="javascript:this.form.myselectvalue.value=5;" name="myselect">
 <font color="#0000cc" style="FONT-SIZE: 12px">
 Photos
-</font>
+</font> -->
 
 <table width="100%" cellspacing="0" cellpadding="0" border="0" align="right">
 <tbody>
