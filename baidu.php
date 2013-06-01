@@ -1,3 +1,4 @@
+
 <script language="javascript">
 function gowhere1(formname) {
 var url;
@@ -62,29 +63,29 @@ return true;
 
 <input type="radio" value="0" onclick="javascript:this.form.myselectvalue.value=4;" name="myselect">
 <font color="#0000cc" style="FONT-SIZE: 12px">
-新闻
+News
 </font>
 
 <input type="radio" value="0" onclick="javascript:this.form.myselectvalue.value=0;" name="myselect" checked="">
 <span class="f12">
 <font color="#0000cc" style="FONT-SIZE: 12px">
-网页
+Page
 </font>
 </span>
 <input type="radio" value="1" onclick="javascript:this.form.myselectvalue.value=1;" name="myselect">
 <span class="f12">
 <font color="#0000cc" style="FONT-SIZE: 12px">
-音乐
+Music
 </font>
 </span>
 <input type="radio" value="0" onclick="javascript:this.form.myselectvalue.value=6;" name="myselect">
 <font color="#0000cc" style="FONT-SIZE: 12px">
-贴吧
+BBS
 </font>
 
 <input type="radio" value="0" onclick="javascript:this.form.myselectvalue.value=5;" name="myselect">
 <font color="#0000cc" style="FONT-SIZE: 12px">
-图片
+Photos
 </font>
 
 <table width="100%" cellspacing="0" cellpadding="0" border="0" align="right">
@@ -94,7 +95,7 @@ return true;
 <font style="FONT-SIZE: 12px">
 <input size="40" name="word" id="word">
 </font>
-<input type="submit" value="百度一下">
+<input type="submit" value="Baidu!">
 
 </td>
 <td>
