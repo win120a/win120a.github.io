@@ -1,2 +1,8 @@
 User-Agent: *
 Disallow: /
+
+User-Agent: *
+Disallow: /homepage2
+
+User-Agent: *
+Disallow: *
