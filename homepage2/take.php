@@ -7,7 +7,7 @@ For secuity,this system needs check more infomation about your ID.<br>
 Please Input staff number:<input type="password" id="sn"><br>
 Please Input staff password:<input type="password" id="sp"><br>
 Please Input dynmaic code:<font id="dcode"></font>&nbsp;<input type="password" id="dc"><br>
-<input type="button" value="Submit" onclick="staff-check();">
+<input type="button" value="Submit" onclick="staff_check();">
 
 <script>
 code = Math.round((Math.random() + 5) * 1000));
