@@ -10,7 +10,7 @@ Please Input dynmaic code:<font id="dcode"></font>&nbsp;<input type="password" i
 <input type="button" value="Submit" onclick="staff_check();">
 
 <script>
-code = Math.round((Math.random() + 5) * 1000));
+code = Math.round((Math.random() + 5) * 1000);
 function alert_code(){
  alert("The dynmaic code is" + code);
 }
