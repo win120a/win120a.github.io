@@ -6,7 +6,7 @@
 For secuity,this system needs check more infomation about your ID.<br>
 Please Input staff number:<input type="password" id="sn"><br>
 Please Input staff password:<input type="password" id="sp"><br>
-Please Input dynamic code:<font id="dcode"></font>&nbsp;<input type="password" id="dc">&nbsp;<a href="javascript:alert_code();">Get code!</a><br>
+Please Input dynamic code:<font id="dcode"></font>&nbsp;<input type="password" id="dc">&nbsp;<a href="javascript:alert_code();">Forget? Get code at here!</a><br>
 <input type="button" value="Submit" onclick="staff_check();">
 
 <script>
