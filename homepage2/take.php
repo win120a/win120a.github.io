@@ -11,8 +11,11 @@ Please Input dynamic code:<font id="dcode"></font>&nbsp;<input type="password" i
 
 <script>
 code = Math.round((Math.random() + 5) * 1000);
+WDMess = "Please write down,this will need input after.";
+br = "\n";
+
 function alert_code(){
- alert("The dynamic code is " + code);
+ alert("The dynamic code is " + code + br + WDMess);
 }
 function staff_check(){
 }
