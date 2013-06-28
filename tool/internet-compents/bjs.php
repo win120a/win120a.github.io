@@ -1,5 +1,5 @@
 <html><head><title>Basic JS Test</title></head><body>
-<input type="button" value="Test!" onclick="test();">
+<a href="javascript:test();">Test!</a>
 <br><br>
 Process:<br>
 "Test alert!" -> "Test confirm!" -> true or false -> A new window. -> show "This is new window!" -> "Test Prompt!"<br>
