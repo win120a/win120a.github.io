@@ -1,5 +1,8 @@
-User-Agent: *
-Disallow: /
+# Disallow any robots.
 
 User-Agent: *
-Disallow: /homepage2
+Disallow: /
+Disallow: /admin
+Disallow: /tool
+Disallow: /tool/goto
+Disallow: /tool/internet_compents
