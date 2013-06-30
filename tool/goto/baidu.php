@@ -44,7 +44,7 @@ return true;
 <td>
 <table width="144%" height="80" cellspacing="0" cellpadding="0" border="0">
 <input type="hidden" value="0" name="myselectvalue">
-<input type="hidden" value="utf-8" name="ie">
+<input type="hidden" value="" name="ie">
 <input type="hidden" name="tn" value="baidu">
 <input type="hidden" name="ct">
 <input type="hidden" name="lm">
