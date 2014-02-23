@@ -184,13 +184,14 @@ _hmt.push(['_trackPageview', '/website/errors/404']);
 You entered page was not found on my server.<br>
 Please check spell and try again.<br>
 <br><br><br>Server by GitHub Inc.<br>
-Copyright&copy;<i id='yr'></i>&nbsp;Andy Cheung
+Copyright&copy;<i id='yr' name='yr'></i>&nbsp;Andy Cheung
 </center>
 
 <script>
 $ = document.getElementById;
 DateObject = new Date();
 $('yr').innerHTML = DateObject.getYear();
+document.yr.innerHTML = DateObject.getYear();
 </script>
 
 </body>
