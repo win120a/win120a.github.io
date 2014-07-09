@@ -1,2 +1,1 @@
-360se
-chrome
+iexplore,360se,firefox,chrome,safari
