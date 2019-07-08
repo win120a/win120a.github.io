@@ -183,15 +183,13 @@ _hmt.push(['_trackPageview', '/website/errors/404']);
 <center>
 The page you entered is not exist on my server.<br>
 Please check spelling and try again.<br>
-<br><br><br>Server by GitHub Inc.<br>
-Copyright&copy;<i id='yr' name='yr'></i>&nbsp;Andy Cheung
+<br><br><br>This website is hosted by GitHub Pages.<br>
+Copyright&nbsp;&copy;&nbsp;<b id='yr' name='yr'></b>&nbsp;Andy Cheung
 </center>
 
 <script>
-$ = document.getElementById;
 DateObject = new Date();
-$('yr').innerHTML = DateObject.getYear();
-document.yr.innerHTML = DateObject.getYear();
+document.getElementById('yr').innerHTML = "2011-" + DateObject.getFullYear();
 </script>
 
 </body>
