@@ -2,7 +2,3 @@
 
 User-Agent: *
 Disallow: /
-Disallow: /admin
-Disallow: /tool
-Disallow: /tool/goto
-Disallow: /tool/internet_compents
