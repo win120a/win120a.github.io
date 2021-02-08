@@ -1,5 +1,5 @@
 ---
-title: 原理初探 | Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理
+title: Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理
 date: 2020-06-10
 tags: Tomcat 原理探究
 ---
@@ -181,3 +181,7 @@ https://github.com/openjdk/jdk14
 https://github.com/apache/tomcat/tree/9.0.x
 
 </small>
+
+<hr />
+
+[ TART - TC - T1 - Y20 (1) ] @HQ

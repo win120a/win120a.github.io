@@ -1,0 +1,605 @@
+---
+title: Java 注解 (Annotation) 从编译到运行时发生了什么
+date: 2021-01-27 22:48:31
+tags: OpenJDK 底层探究
+---
+
+# 全文约定
+
+定义注解如下：
+
+（运行时可见）
+
+```java
+@Target({ElementType.FIELD, ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+public @interface TestRuntimeVisibleAnnotation {
+    String pathInResources();
+}
+```
+<br />
+```java
+@Target({ElementType.TYPE, ElementType.FIELD})
+@Retention(RetentionPolicy.RUNTIME)
+
+public @interface RuntimeVisibleAnnotation2 {
+    int data();
+
+    Class<?> theClass() default Object.class;
+}
+```
+
+
+
+<br />
+
+（出现于 class 文件）
+
+```java
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.CLASS)
+public @interface TestClassFileAnnotation {
+}
+```
+
+<br />
+
+（只能被 APT 处理）
+
+```java
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.SOURCE)
+public @interface TestSourceFileAnnotation {
+}
+```
+
+
+
+我们可以知道 @TestRuntimeVisibleAnnotation 和 @RuntimeVisibleAnnotation2 是用来修饰 Field 且在运行时可见的注解，@TestClassFileAnnotation 是用来修饰类型且只能在 Class 文件中可见的注解（不能被运行时查到），@TestSourceFileAnnotation 是一个修饰类型并且只能被编译时的注解处理器 (APT) 处理，class 文件并不可见。
+
+
+
+# 编译时发生的事情
+
+## 注解一方
+
+### 编译后的 class 文件成了啥样
+
+我们使用 javap 工具来分析测试 TestRuntimeVisibleAnnotation 的 class 文件
+
+```shell
+javap -v TestRuntimeVisibleAnnotation.class
+```
+
+
+
+发现输出如下：
+
+```java
+Compiled from "TestRuntimeVisibleAnnotation.java"
+public interface TestRuntimeVisibleAnnotation extends java.lang.annotation.Annotation
+  minor version: 65535
+  major version: 59
+  flags: (0x2601) ACC_PUBLIC, ACC_INTERFACE, ACC_ABSTRACT, ACC_ANNOTATION
+  this_class: #1                          // TestRuntimeVisibleAnnotation
+  super_class: #3                         // java/lang/Object
+  interfaces: 1, fields: 0, methods: 1, attributes: 2
+Constant pool:
+   #1 = Class              #2             // TestRuntimeVisibleAnnotation
+   #2 = Utf8               TestRuntimeVisibleAnnotation
+   #3 = Class              #4             // java/lang/Object
+   #4 = Utf8               java/lang/Object
+   #5 = Class              #6             // java/lang/annotation/Annotation
+   #6 = Utf8               java/lang/annotation/Annotation
+   #7 = Utf8               pathInResources
+   #8 = Utf8               ()Ljava/lang/String;
+   #9 = Utf8               SourceFile
+  #10 = Utf8               TestRuntimeVisibleAnnotation.java
+  #11 = Utf8               RuntimeVisibleAnnotations
+  #12 = Utf8               Ljava/lang/annotation/Target;
+  #13 = Utf8               value
+  #14 = Utf8               Ljava/lang/annotation/ElementType;
+  #15 = Utf8               FIELD
+  #16 = Utf8               TYPE
+  #17 = Utf8               Ljava/lang/annotation/Retention;
+  #18 = Utf8               Ljava/lang/annotation/RetentionPolicy;
+  #19 = Utf8               RUNTIME
+{
+  public abstract java.lang.String pathInResources();
+    descriptor: ()Ljava/lang/String;
+    flags: (0x0401) ACC_PUBLIC, ACC_ABSTRACT
+}
+SourceFile: "TestRuntimeVisibleAnnotation.java"
+RuntimeVisibleAnnotations:
+  0: #12(#13=[e#14.#15,e#14.#16])
+    java.lang.annotation.Target(
+      value=[Ljava/lang/annotation/ElementType;.FIELD,Ljava/lang/annotation/ElementType;.TYPE]
+    )
+  1: #17(#13=e#18.#19)
+    java.lang.annotation.Retention(
+      value=Ljava/lang/annotation/RetentionPolicy;.RUNTIME
+    )
+
+```
+
+
+
+根据 Java 虚拟机规范 [1]，class 文件的 access_flags 决定了这个类（或变量等）的性质以及访问的权限。
+
+![](image-20210207211719053.png)
+
+![The "Class File structure" section of The Java Virtual Machine Specification](image-20210207211731050.png)
+
+根据 javap 的输出 中的 flags： 
+
+`(0x2601) ACC_PUBLIC, ACC_INTERFACE, ACC_ABSTRACT, ACC_ANNOTATION`
+
+
+
+并查表可知：
+
+ACC_PUBLIC:  表示 public 访问权限。
+
+ACC_INTERFACE:  表示这是一个接口。
+
+ACC_ABSTRACT:  这是一个特殊的标识，表示这是抽象的（ACC_INTERFACE 存在时，这个也要存在）。
+
+ACC_ANNOTAION:  表示这是一个注解对象。
+
+
+
+可知注解的真实身份是一种特殊的接口。它是 `java.lang.annotation.Annotation` 的子接口。而 `String pathInResources();`  最终也变成了这个 “接口” 的方法声明。
+
+
+
+## 使用注解的一方
+
+### 编译时发生的事情
+
+下面是一个测试类：
+
+```java
+@TestClassFileAnnotation
+@TestSourceFileAnnotation
+public class Class2 {
+
+    @TestRuntimeVisibleAnnotation(pathInResources = "1")
+    private static final String test = "1";
+}
+```
+
+
+
+对这个类进行编译，反编译的结果如下：
+
+![](1.jpg)
+
+
+
+我们可以看到，@TestSourceFileAnnotation 消失了，这与这个注解的 @Retention 的值是相匹配的。
+
+
+
+由这一过程可以看到，javac 并没有把这个注解写入 class 文件里头。打开 [javac 写入 class 文件的代码 [2]](https://github.com/openjdk/jdk15/blob/master/src/jdk.compiler/share/classes/com/sun/tools/javac/jvm/ClassWriter.java)，并定位到 473 行的 writeJavaAnnotations() 的部分代码如下：
+
+```java
+/**********************************************************************
+ * Writing Java-language annotations (aka metadata, attributes)
+ **********************************************************************/
+
+    /** Write Java-language annotations; return number of JVM
+     *  attributes written (zero or one).
+     */
+    int writeJavaAnnotations(List<Attribute.Compound> attrs) {
+        if (attrs.isEmpty()) return 0;
+        ListBuffer<Attribute.Compound> visibles = new ListBuffer<>();
+        ListBuffer<Attribute.Compound> invisibles = new ListBuffer<>();
+        for (Attribute.Compound a : attrs) {
+            switch (types.getRetention(a)) {
+            case SOURCE: break;
+            case CLASS: invisibles.append(a); break;
+            case RUNTIME: visibles.append(a); break;
+            default: // /* fail soft */ throw new AssertionError(vis);
+            }
+        }
+
+        int attrCount = 0;
+        if (visibles.length() != 0) {
+            int attrIndex = writeAttr(names.RuntimeVisibleAnnotations);
+            databuf.appendChar(visibles.length());
+            for (Attribute.Compound a : visibles)
+                writeCompoundAttribute(a);
+            endAttr(attrIndex);
+            attrCount++;
+        }
+        if (invisibles.length() != 0) {
+            // ....
+        }
+        return attrCount;
+    }
+```
+
+
+
+### 编译之后的 class 文件变成了啥样
+
+我们使用 javap 工具来分析测试类 Class2 的 class 文件
+
+```shell
+javap -p -v Class2.class
+```
+
+
+
+发现输出如下：
+
+```java
+Compiled from "Class2.java"
+
+public class Class2
+  minor version: 65535
+  major version: 59
+  flags: (0x0021) ACC_PUBLIC, ACC_SUPER
+  this_class: #7                          // Class2
+  super_class: #2                         // java/lang/Object
+  interfaces: 0, fields: 1, methods: 1, attributes: 2
+Constant pool:
+   #1 = Methodref          #2.#3          // java/lang/Object."<init>":()V
+   #2 = Class              #4             // java/lang/Object
+   #3 = NameAndType        #5:#6          // "<init>":()V
+   #4 = Utf8               java/lang/Object
+   #5 = Utf8               <init>
+   #6 = Utf8               ()V
+   #7 = Class              #8             // Class2
+   #8 = Utf8               Class2
+   #9 = Utf8               test
+  #10 = Utf8               Ljava/lang/String;
+  #11 = Utf8               ConstantValue
+  #12 = String             #13            // 1
+  #13 = Utf8               1
+  #14 = Utf8               RuntimeVisibleAnnotations
+  #15 = Utf8               LTestRuntimeVisibleAnnotation;
+  #16 = Utf8               pathInResources
+  #17 = Utf8               Code
+  #18 = Utf8               LineNumberTable
+  #19 = Utf8               LocalVariableTable
+  #20 = Utf8               this
+  #21 = Utf8               LClass2;
+  #22 = Utf8               SourceFile
+  #23 = Utf8               Class2.java
+  #24 = Utf8               RuntimeInvisibleAnnotations
+  #25 = Utf8               LTestClassFileAnnotation;
+{
+  private static final java.lang.String test;
+    descriptor: Ljava/lang/String;
+    flags: (0x001a) ACC_PRIVATE, ACC_STATIC, ACC_FINAL
+    ConstantValue: String 1
+    RuntimeVisibleAnnotations:
+      0: #15(#16=s#13)
+        TestRuntimeVisibleAnnotation(
+          pathInResources="1"
+        )
+
+  public Class2();
+    descriptor: ()V
+    flags: (0x0001) ACC_PUBLIC
+    Code:
+      stack=1, locals=1, args_size=1
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+         4: return
+      LineNumberTable:
+        line 4: 0
+      LocalVariableTable:
+        Start  Length  Slot  Name   Signature
+            0       5     0  this   LClass2;
+}
+SourceFile: "Class2.java"
+RuntimeInvisibleAnnotations:
+  0: #25()
+    TestClassFileAnnotation
+
+```
+
+
+
+根据输出，我们可以看到 Retention 指定成 RetentionPolicy.CLASS 的注解是写到了被修饰对象属性表的 RuntimeInvisibleAnnotations 项目中。而指定成 RetentionPolicy.RUNTIME 的注解写到了被修饰对象属性表的 RuntimeVisibleAnnotation 项目中。
+
+
+
+# 运行时
+
+## 运行时类型探秘
+
+我们修改一下测试类，探究一下获取到的注解对象的运行时类型：
+
+```java
+import java.util.Arrays;
+
+@TestRuntimeVisibleAnnotation (pathInResources = "class2")
+@TestClassFileAnnotation
+@TestSourceFileAnnotation
+@RuntimeVisibleAnnotation2 (data = 1)
+public class Class2 {
+
+    @TestRuntimeVisibleAnnotation(pathInResources = "123")
+    private static final String test = "1";
+
+    public static void main(String[] args) {
+        Class<Class2> klass = Class2.class;
+
+        System.out.println(Arrays.toString(klass.getDeclaredAnnotations()));
+
+        var annotationObjectOfField = klass.getDeclaredFields()[0].
+                getAnnotation(TestRuntimeVisibleAnnotation.class);
+
+        var annotationObjectOfClass = klass.getAnnotation(TestRuntimeVisibleAnnotation.class);
+
+        var anotherAnnotationObjectOfClass = klass.getAnnotation(RuntimeVisibleAnnotation2.class);
+
+        System.out.println("Hash Code of annotationObjectOfField: " + annotationObjectOfField.hashCode());
+        System.out.println("Identity Hash Code of annotationObjectOfField: " + System.identityHashCode(annotationObjectOfField));
+        System.out.println("Class name of annotationObjectOfField: " + annotationObjectOfField.getClass().getName());
+
+        System.out.println();
+
+        System.out.println("Hash Code of annotationObjectOfClass: " + annotationObjectOfClass.hashCode());
+        System.out.println("Identity Hash Code of annotationObjectOfClass: " + System.identityHashCode(annotationObjectOfClass));
+        System.out.println("Class name of annotationObjectOfClass: " + annotationObjectOfClass.getClass().getName());
+        
+        System.out.println();
+
+        System.out.println("Hash Code of anotherAnnotationObjectOfClass: " + anotherAnnotationObjectOfClass.hashCode());
+        System.out.println("Identity Hash Code of anotherAnnotationObjectOfClass: " + System.identityHashCode(anotherAnnotationObjectOfClass));
+        System.out.println("Class name of anotherAnnotationObjectOfClass: " + anotherAnnotationObjectOfClass.getClass().getName());
+
+        System.out.println(annotationObjectOfField.pathInResources());
+    }
+}
+
+```
+
+<br />
+
+运行输出如下：
+
+```java
+[@TestRuntimeVisibleAnnotation(pathInResources="class2"), @RuntimeVisibleAnnotation2(theClass=java.lang.Object.class, data=1)]
+Hash Code of annotationObjectOfField: -995842473
+Identity Hash Code of annotationObjectOfField: 1368884364
+Class name of annotationObjectOfField: com.sun.proxy.$Proxy1
+
+Hash Code of annotationObjectOfClass: 1806409183
+Identity Hash Code of annotationObjectOfClass: 772777427
+Class name of annotationObjectOfClass: com.sun.proxy.$Proxy1
+    
+Hash Code of anotherAnnotationObjectOfClass: 291781459
+Identity Hash Code of anotherAnnotationObjectOfClass: 83954662
+Class name of anotherAnnotationObjectOfClass: com.sun.proxy.$Proxy2
+123
+```
+
+
+
+根据输出中的 `Class name of XXX` 的结果的 `com.sun.proxy.$ProxyX` 可以知道，在运行时当中获取的注解的实例，是由动态代理产生的。（还是熟悉的套路 ~）并且是一个注解一个对应一个类。
+
+
+
+## 运行时类型的生成
+
+### 动态代理的回顾
+
+在分析注解运行时对象的行为之前，我们先来用一个案例简要回顾一下动态代理。
+
+```java
+package ac.testproj.invoke;
+
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+
+/**
+ * 封装动态代理对象的调用行为。
+ * 
+ * @author Andy Cheung
+ */
+class MyInvocationHandler implements InvocationHandler {
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+
+        System.out.println("Invoking method: " + method.getName());
+
+        switch (method.getName()) {
+            case "hashCode":
+                return super.hashCode();
+            case "equals":
+                return super.equals(args[0]);
+            case "toString":
+                return super.toString();
+            default:
+                break;
+        }
+
+        if (method.getParameterCount() != 0) {
+            System.out.println("Received a number: " + args[0]);
+            return ((Integer) args[0]) + 1;
+        }
+
+        return null;
+    }
+}
+
+/**
+ * 对外提供调用方法的接口。
+ * 
+ * @author Andy Cheung 
+ */
+interface Action {
+    void act1();
+    void act2();
+    int act3(int val);
+}
+
+/**
+ * 测试类。
+ *
+ * @author Andy Cheung
+ */
+public class TestInvocationHandler {
+    public static void main(String[] args) {
+        // 让动态代理机制写入生成的中间 class 文件到硬盘。
+        System.getProperties().put("jdk.proxy.ProxyGenerator.saveGeneratedFiles", "true");
+
+        var proxy = (Action) Proxy.newProxyInstance(TestInvocationHandler.class.getClassLoader(),
+                new Class[] {Action.class}, new MyInvocationHandler());
+
+        proxy.act1();
+        proxy.act2();
+        System.out.println("Got Return in act3: " + proxy.act3(1));
+
+        System.out.println(proxy.getClass().getName());
+    }
+}
+
+```
+
+<br />
+
+输出如下：
+
+```java
+Invoking method: act1
+Invoking method: act2
+Invoking method: act3
+Received a number: 1
+Got Return in act3: 2
+$Proxy0
+```
+
+
+
+运行后工作目录出现了生成的 class 文件：
+
+![Generated proxy class file [Fig. of Sect. Proxy 1, 20210208]](image-20210208234414843.png)
+
+
+
+经过反编译，发现生成的代码如下（部分代码，顺序经过调整）：
+
+```java
+package ac.testproj.invoke;
+
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.lang.reflect.UndeclaredThrowableException;
+
+final class $Proxy0 extends Proxy implements Action {
+    private static Method m0;
+    private static Method m1;
+    private static Method m2;
+    private static Method m3;
+    private static Method m4;
+    private static Method m5;
+    
+    static {
+        try {
+            m0 = Class.forName("java.lang.Object").getMethod("hashCode");
+            m1 = Class.forName("java.lang.Object").getMethod("equals", Class.forName("java.lang.Object"));
+            m2 = Class.forName("java.lang.Object").getMethod("toString");
+            m3 = Class.forName("ac.testproj.invoke.Action").getMethod("act3", Integer.TYPE);
+            m4 = Class.forName("ac.testproj.invoke.Action").getMethod("act2");
+            m5 = Class.forName("ac.testproj.invoke.Action").getMethod("act1");
+        } catch (NoSuchMethodException var2) {
+            throw new NoSuchMethodError(var2.getMessage());
+        } catch (ClassNotFoundException var3) {
+            throw new NoClassDefFoundError(var3.getMessage());
+        }
+    }
+    
+    public $Proxy0(InvocationHandler param1) {
+        super(var1);
+    }
+
+    public final int act3(int var1) {
+        // super.h 就是我们指定的 InvocationHandler。
+        try {
+            return (Integer)super.h.invoke(this, m3, new Object[]{var1});
+        } catch (RuntimeException | Error var2) {
+            throw var2;
+        } catch (Throwable var3) {
+            throw new UndeclaredThrowableException(var3);
+        }
+    }
+
+    public final void act2() {
+        try {
+            super.h.invoke(this, m4, (Object[])null);
+        } catch (RuntimeException | Error var2) {
+            throw var2;
+        } catch (Throwable var3) {
+            throw new UndeclaredThrowableException(var3);
+        }
+    }
+
+    public final void act1() { /* ... */ }
+    public final int hashCode() { /* ... */ }
+    public final boolean equals(Object var1) { /* ... */ }
+    public final String toString() { /* ... */ }
+}
+
+```
+
+
+
+根据生成的中间代码我们可以看出，
+
+
+
+(Proxy & InvocationHandler)
+
+### 注解的动态代理对象的生成
+
+(AnnotationParser 以及 Field 等类)
+
+## 动态代理对象行为的分析
+
+（AnnotationInvocationHandler）
+
+根据上述信息
+
+
+
+--------
+备注：
+
+1. 使用 Oracle OpenJDK 15 编译，并启动了预览功能。
+
+--------
+
+参考代码：
+
+<style>
+    small p {
+        color : grey;
+        line-height : 1em !important;
+    }
+</style>
+
+
+<small>
+
+[1] The Java Virtual Machine Specification, Java SE 15 Edition
+
+https://docs.oracle.com/javase/specs/jvms/se15/jvms15.pdf
+
+[2] openJDK
+
+https://github.com/openjdk/jdk15/blob/master/src/jdk.compiler/share/classes/com/sun/tools/javac/jvm/ClassWriter.java
+
+</small>
+
+<hr />
+
+[ TART - JDK - T2 - Y21 (1) ] @HQ
