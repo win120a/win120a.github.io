@@ -381,7 +381,7 @@ Class name of anotherAnnotationObjectOfClass: com.sun.proxy.$Proxy2
 
 
 
-根据输出中的 `Class name of XXX` 的结果的 `com.sun.proxy.$ProxyX` 可以知道，在运行时当中获取的注解的实例，是由动态代理产生的。（还是熟悉的套路 ~）并且是一个注解一个对应一个类。
+根据输出中的 `Class name of XXX` 的结果的 `com.sun.proxy.$ProxyX` 可以知道，在运行时当中获取的注解的实例，是由动态代理产生的。并且是一个注解一个对应一个类。
 
 
 
@@ -389,7 +389,7 @@ Class name of anotherAnnotationObjectOfClass: com.sun.proxy.$Proxy2
 
 ### 动态代理的回顾
 
-在分析注解运行时对象的行为之前，我们先来用一个案例简要回顾一下动态代理。
+在分析注解运行时对象的行为之前，我们先来用一个案例简要回顾一下动态代理的行为。
 
 ```java
 package ac.testproj.invoke;
@@ -474,18 +474,18 @@ Invoking method: act2
 Invoking method: act3
 Received a number: 1
 Got Return in act3: 2
-$Proxy0
+ac.testproj.invoke.$Proxy0
 ```
 
 
 
 运行后工作目录出现了生成的 class 文件：
 
-![Generated proxy class file [Fig. of Sect. Proxy 1, 20210208]](image-20210208234414843.png)
+![Generated proxy class file [Fig. (Sect. Proxy) 1, 20210208]](image-20210208234414843.png)
 
 
 
-经过反编译，发现生成的代码如下（部分代码，顺序经过调整）：
+经过反编译，发现生成的代码如下（节选部分且顺序经过调整）：
 
 ```java
 package ac.testproj.invoke;
@@ -519,7 +519,7 @@ final class $Proxy0 extends Proxy implements Action {
     }
     
     public $Proxy0(InvocationHandler param1) {
-        super(var1);
+        super(param1);
     }
 
     public final int act3(int var1) {
@@ -553,15 +553,80 @@ final class $Proxy0 extends Proxy implements Action {
 
 
 
-根据生成的中间代码我们可以看出，
+根据生成的中间代码我们可以看出，动态代理实际上是在内存中（如果没有指定保存到硬盘上的话）生成一个中间代理类，这个代理类继承了 Proxy 类，并实现了我们指定的接口和 Serializable 接口（由 Proxy 类实现）。其将所有的方法（包括我们指定的接口以及 Object 类的方法）委托给传入的 InvocationHandler。由此证实 InvocationHandler 封装了动态代理类的行为。
 
 
-
-(Proxy & InvocationHandler)
 
 ### 注解的动态代理对象的生成
 
 (AnnotationParser 以及 Field 等类)
+
+回到 “运行时类型探秘” 的测试类。
+
+```java
+var annotationObjectOfField = klass.getDeclaredFields()[0].
+                getAnnotation(TestRuntimeVisibleAnnotation.class);
+
+var annotationObjectOfClass = klass.getAnnotation(TestRuntimeVisibleAnnotation.class);
+
+var anotherAnnotationObjectOfClass = klass.getAnnotation(RuntimeVisibleAnnotation2.class);
+```
+
+
+
+我们从 Field 类的 getAnnotation 方法入手。
+
+```java
+@Override
+public <T extends Annotation> T getAnnotation(Class<T> annotationClass) {
+    Objects.requireNonNull(annotationClass);
+    
+    // 从 declaredAnnotations 获取对应类的 Annotation 对象。
+    // 因为 get 方法返回的是 Annotation 即父接口对象。
+    // 所以将返回的 Annotation 对象转换成指定的注解类对象（相当于强转）。
+    return annotationClass.cast(declaredAnnotations().get(annotationClass));
+}
+```
+
+
+
+发现它实际上是执行了 declaredAnnotations() 方法来查找修饰 Field 的注解。对这个方法的分析如下：
+
+```java
+private Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
+        Map<Class<? extends Annotation>, Annotation> declAnnos;
+    
+        // 这用了类似于 Double Checked Locking 的机制，用来检查是否有了缓存。
+        // 如果有了缓存，就不需要加锁创建缓存了。
+        // 这主要是为了防止多线程同时调用这一方法产生的混乱。
+        if ((declAnnos = declaredAnnotations) == null) {
+            synchronized (this) {
+                if ((declAnnos = declaredAnnotations) == null) {
+                    Field root = this.root;
+                    if (root != null) {
+                        declAnnos = root.declaredAnnotations();
+                    } else {
+                        // 无论是么情况，最终都要调用到这里。
+                        // 这将注解的解析交给了 AnnotationParser 处理。
+                        declAnnos = AnnotationParser.parseAnnotations(
+                                annotations,
+                                SharedSecrets.getJavaLangAccess()
+                                        .getConstantPool(getDeclaringClass()),
+                                getDeclaringClass());
+                    }
+                    
+                    // 将获取到的注解缓存起来。
+                    declaredAnnotations = declAnnos;
+                }
+            }
+        }
+        return declAnnos;
+    }
+```
+
+
+
+
 
 ## 动态代理对象行为的分析
 
