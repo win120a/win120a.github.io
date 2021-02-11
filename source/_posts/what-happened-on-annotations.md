@@ -436,8 +436,379 @@ Class name of anotherAnnotationObjectOfClass: com.sun.proxy.$Proxy2
 
 
 
-## 运行时类型的生成
+## Java 标准库对注解的解析
+### 注解的识别
 
+回到 “运行时类型探秘” 的测试类。
+
+```java
+var annotationObjectOfField = klass.getDeclaredFields()[0].
+                getAnnotation(TestRuntimeVisibleAnnotation.class);
+
+var annotationObjectOfClass = klass.getAnnotation(TestRuntimeVisibleAnnotation.class);
+
+var anotherAnnotationObjectOfClass = klass.getAnnotation(RuntimeVisibleAnnotation2.class);
+```
+
+
+
+我们从 Field 类的 getAnnotation 方法 [3] 入手。
+
+```java
+@Override
+public <T extends Annotation> T getAnnotation(Class<T> annotationClass) {
+    Objects.requireNonNull(annotationClass);
+    
+    // 从 declaredAnnotations 获取对应类的 Annotation 对象。
+    // 因为 get 方法返回的是 Annotation 即父接口对象。
+    // 所以将返回的 Annotation 对象转换成指定的注解类对象（相当于强转）。
+    return annotationClass.cast(declaredAnnotations().get(annotationClass));
+}
+```
+
+
+
+发现它实际上是执行了 declaredAnnotations() 方法来查找修饰 Field 的注解。对这个方法的分析如下：
+
+```java
+private Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
+    Map<Class<? extends Annotation>, Annotation> declAnnos;
+
+    // 这用了 Double Checked Locking 的机制，用来检查是否有了缓存。
+    // 如果有了缓存，就不需要加锁创建缓存了。
+    // 这主要是为了防止多线程同时调用这一方法产生的混乱。
+    if ((declAnnos = declaredAnnotations) == null) {
+        synchronized (this) {
+            if ((declAnnos = declaredAnnotations) == null) {
+                // Class 的 getField 等方法返回的是经过复制的 Field 对象，
+                // 这是为了找到最初由运行时生成的 Field 对象
+                Field root = this.root;
+                if (root != null) {
+                    declAnnos = root.declaredAnnotations();
+                } else {
+                    // 但是，无论是什么情况，最终都要调用到这里。
+                    // 这将注解的解析交给了 AnnotationParser 处理。
+                    declAnnos = AnnotationParser.parseAnnotations(
+                        annotations,
+                        SharedSecrets.getJavaLangAccess()
+                        .getConstantPool(getDeclaringClass()),
+                        getDeclaringClass());
+                }
+
+                // 将获取到的注解缓存起来。
+                declaredAnnotations = declAnnos;
+            }
+        }
+    }
+    return declAnnos;
+}
+```
+
+
+
+对 Field 中的 declaredAnnotation() 方法中的的语句打断点，进行 Debug。根据 Variables，我们获取到这个 Field 的 annotations 的值：
+
+![image-20210210174901846](image-20210210174901846.png)
+
+
+
+将这个值抄写下来 （十六进制）：
+
+```
+00 01 00 67 00 01 00 60 73 00 68
+```
+
+
+
+根据上文，这是 RuntimeVisibleAnnotations 的属性值。
+
+![image-20210210181034254](image-20210210181034254.png)
+
+这表示了注解的数据。
+
+
+
+接下来分析 parseAnnotations 方法 [5]。
+
+```java
+public static Map<Class<? extends Annotation>, Annotation> parseAnnotations(
+    byte[] rawAnnotations,
+    ConstantPool constPool,
+    Class<?> container) {
+    if (rawAnnotations == null)
+        return Collections.emptyMap();
+
+    try {
+        // 委派给 2 号方法。
+        return parseAnnotations2(rawAnnotations, constPool, container, null);
+    } catch(BufferUnderflowException e) {
+        throw new AnnotationFormatError("Unexpected end of annotations.");
+    } catch(IllegalArgumentException e) {
+        // Type mismatch in constant pool
+        throw new AnnotationFormatError(e);
+    }
+}
+
+// 2 号方法
+private static Map<Class<? extends Annotation>, Annotation> parseAnnotations2(
+                byte[] rawAnnotations,
+                ConstantPool constPool,
+                Class<?> container,
+                Class<? extends Annotation>[] selectAnnotationClasses) {
+        Map<Class<? extends Annotation>, Annotation> result =
+            new LinkedHashMap<Class<? extends Annotation>, Annotation>();
+        ByteBuffer buf = ByteBuffer.wrap(rawAnnotations);
+    	// 获取前两个字节 （确定多少个注解）
+        int numAnnotations = buf.getShort() & 0xFFFF;
+        for (int i = 0; i < numAnnotations; i++) {
+            // 委派给识别单个注解的 3 号方法。
+            Annotation a = parseAnnotation2(buf, 
+                                            constPool, 
+                                            container, 
+                                            false, selectAnnotationClasses);
+            if (a != null) {
+                Class<? extends Annotation> klass = a.annotationType();
+                if (AnnotationType.getInstance(klass).retention() == RetentionPolicy.RUNTIME &&
+                    result.put(klass, a) != null) {
+                        throw new AnnotationFormatError(
+                            "Duplicate annotation for class: "+klass+": " + a);
+                }
+            }
+        }
+        return result;
+    }
+
+// 解析单个注解的 3 号方法。
+private static Annotation parseAnnotation2(ByteBuffer buf,
+                                           ConstantPool constPool,
+                                           Class<?> container,
+                                           boolean exceptionOnMissingAnnotationClass,
+                                           Class<? extends Annotation>[] selectAnnotationClasses)
+{
+    // 获取注解的类型引用（常量池中注解类条目的序号）
+    int typeIndex = buf.getShort() & 0xFFFF;
+    Class<? extends Annotation> annotationClass = null;
+    String sig = "[unknown]";
+    try {
+        try {
+            // 获取常量池中注解类的对应类名
+            sig = constPool.getUTF8At(typeIndex);
+            // 将常量池表示转化为 Class 对象表示（并转化为 Annotation 的泛型）
+            annotationClass = (Class<? extends Annotation>)parseSig(sig, container);
+        } catch (IllegalArgumentException ex) {
+            // support obsolete early jsr175 format class files - 向后兼容
+            annotationClass = (Class<? extends Annotation>)constPool.getClassAt(typeIndex);
+        }
+    } catch (NoClassDefFoundError | TypeNotPresentException e) {
+        return null;
+        // 异常处理略
+    }
+    
+    // selectAnnotationClasses 根据上面的调用是 null，故不执行。
+    if (selectAnnotationClasses != null && 
+        !contains(selectAnnotationClasses, annotationClass)) {
+        skipAnnotation(buf, false);
+        return null;
+    }
+    
+    AnnotationType type = null;
+    try {
+        // 根据刚刚找到的注解类建立 AnnotationType 的实例（反射对象）。
+        // 对于这个方法的分析详见 “AnnotationType 反射对象的建立”。
+        // 这个类的主要作用是用来保存这个注解的共有信息的。
+        type = AnnotationType.getInstance(annotationClass);
+    } catch (IllegalArgumentException e) {
+        skipAnnotation(buf, false);
+        return null;
+    }
+
+    // 根据刚刚建立的 AnnotationType 的实例填充有关信息。
+    Map<String, Class<?>> memberTypes = type.memberTypes();
+    Map<String, Object> memberValues =
+        new LinkedHashMap<String, Object>(type.memberDefaults());
+
+    // 获取键值对属性的个数
+    int numMembers = buf.getShort() & 0xFFFF;
+    for (int i = 0; i < numMembers; i++) {
+        int memberNameIndex = buf.getShort() & 0xFFFF;
+        // 从常量池当中取得属性名及其它的类型。
+        String memberName = constPool.getUTF8At(memberNameIndex);
+        Class<?> memberType = memberTypes.get(memberName);
+
+        if (memberType == null) {
+            // Member is no longer present in annotation type; ignore it
+            skipMemberValue(buf);
+        } else {
+            // 获取属性值。详见 “注解属性值的获取”
+            Object value = parseMemberValue(memberType, buf, constPool, container);
+            if (value instanceof AnnotationTypeMismatchExceptionProxy)
+                ((AnnotationTypeMismatchExceptionProxy) value).
+                setMember(type.members().get(memberName));
+            memberValues.put(memberName, value);
+        }
+    }
+    
+    // 将刚刚获取到的属性值组装成注解接口的代理对象
+    // 并包装为一个 Map 集合。
+    // 详见 “注解的运行时对象的生成”
+    return annotationForMap(annotationClass, memberValues);
+}
+
+```
+
+
+
+### 注解属性值的获取 - AnnotationParser.parseMemberValue
+
+```java
+public static Object parseMemberValue(Class<?> memberType,
+                                          ByteBuffer buf,
+                                          ConstantPool constPool,
+                                          Class<?> container) {
+    Object result = null;
+    int tag = buf.get();
+    switch(tag) {
+        case 'e':
+            return parseEnumValue((Class<? extends Enum<?>>)memberType, buf, constPool, container);
+        case 'c':
+            result = parseClassValue(buf, constPool, container);
+            break;
+        case '@':
+            result = parseAnnotation(buf, constPool, container, true);
+            break;
+        case '[':
+            return parseArray(memberType, buf, constPool, container);
+        default:
+            result = parseConst(tag, buf, constPool);
+    }
+
+    if (!(result instanceof ExceptionProxy) &&
+        !memberType.isInstance(result))
+        result = new AnnotationTypeMismatchExceptionProxy(
+        result.getClass() + "[" + result + "]");
+    return result;
+}
+```
+
+
+
+
+
+### AnnotationType 反射对象的建立
+
+根据上文的，AnnotationType 的主要作用是用来保存这个注解的共有信息的。比如这个注解属性的键。
+
+```java
+public static AnnotationType getInstance(
+    Class<? extends Annotation> annotationClass)
+{
+    /*
+        下面两行相当于：
+            var result = annotationClass.getAnnotationType();
+            
+        具体设计的原因详见备注 2
+    */
+    JavaLangAccess jla = SharedSecrets.getJavaLangAccess();
+    // 根据对 Class 类的分析，AnnotationType 类是有缓存的。
+    AnnotationType result = jla.getAnnotationType(annotationClass); // volatile read
+   
+    // 如果没缓存
+    if (result == null) {
+        
+        // 先自己建一个
+        result = new AnnotationType(annotationClass);
+        
+        // try to CAS the AnnotationType: null -> result
+        // CAS = Compare And Swap
+        // 其相当于 annotationClass.casAnnotationType(null, result);
+        // 这是通过 CAS 确保只有一个线程修改 annotationType 变量
+        if (!jla.casAnnotationType(annotationClass, null, result)) {
+            // somebody was quicker -> read it's result
+            // 如上述注释，这就是说如果有线程修改好了就用它的结果。
+            result = jla.getAnnotationType(annotationClass);
+            assert result != null;
+        }
+    }
+
+    return result;
+}
+```
+```java
+private AnnotationType(final Class<? extends Annotation> annotationClass) {
+    if (!annotationClass.isAnnotation())
+        throw new IllegalArgumentException("Not an annotation type");
+
+    Method[] methods =
+        AccessController.doPrivileged(new PrivilegedAction<>() {
+            public Method[] run() {
+                // Initialize memberTypes and defaultValues
+                // 获取注解 “接口” 的 “方法” （其实就是 “键”）
+                return annotationClass.getDeclaredMethods();
+            }
+        });
+
+    memberTypes = new HashMap<>(methods.length+1, 1.0f);
+    memberDefaults = new HashMap<>(0);
+    members = new HashMap<>(methods.length+1, 1.0f);
+
+    for (Method method : methods) {
+        if (Modifier.isPublic(method.getModifiers()) &&
+            Modifier.isAbstract(method.getModifiers()) &&
+            !method.isSynthetic()) {
+            if (method.getParameterCount() != 0) {
+                throw new IllegalArgumentException(method + " has params");
+            }
+
+            // 获取键
+            String name = method.getName();
+
+            // 获取值的类型
+            Class<?> type = method.getReturnType();
+
+            // invocationHandlerReturnType 主要是将
+            // 基本数据类型的 class 对象转化包装类型的 class 对象
+            memberTypes.put(name, invocationHandlerReturnType(type));
+
+            // 将方法的名字和它对应的 Method 放到 members 表当中。
+            members.put(name, method);
+
+            // 获取默认值 （即 default 字句）
+            Object defaultValue = method.getDefaultValue();
+            if (defaultValue != null) {
+                // 放入默认值表
+                memberDefaults.put(name, defaultValue);
+            }
+        }
+    }
+
+    // Initialize retention, & inherited fields.  Special treatment
+    // of the corresponding annotation types breaks infinite recursion.
+
+    // 处理元注解。
+    if (annotationClass != Retention.class &&
+        annotationClass != Inherited.class) {
+        JavaLangAccess jla = SharedSecrets.getJavaLangAccess();
+        Map<Class<? extends Annotation>, Annotation> metaAnnotations =
+            AnnotationParser.parseSelectAnnotations(
+            jla.getRawClassAnnotations(annotationClass),
+            jla.getConstantPool(annotationClass),
+            annotationClass,
+            Retention.class, Inherited.class
+        );
+        Retention ret = (Retention) metaAnnotations.get(Retention.class);
+        retention = (ret == null ? RetentionPolicy.CLASS : ret.value());
+        inherited = metaAnnotations.containsKey(Inherited.class);
+    }
+    else {
+        retention = RetentionPolicy.RUNTIME;
+        inherited = false;
+    }
+}
+```
+
+
+
+## 注解的运行时对象的生成
 ### 动态代理的回顾
 
 在分析注解运行时对象的行为之前，我们先来用一个案例简要回顾一下动态代理的行为。
@@ -611,223 +982,19 @@ final class $Proxy0 extends Proxy implements Action {
 
 
 
-### 注解的动态代理对象的生成
+### 注解的动态代理对象的建立
 
-回到 “运行时类型探秘” 的测试类。
-
-```java
-var annotationObjectOfField = klass.getDeclaredFields()[0].
-                getAnnotation(TestRuntimeVisibleAnnotation.class);
-
-var annotationObjectOfClass = klass.getAnnotation(TestRuntimeVisibleAnnotation.class);
-
-var anotherAnnotationObjectOfClass = klass.getAnnotation(RuntimeVisibleAnnotation2.class);
-```
-
-
-
-我们从 Field 类的 getAnnotation 方法 [3] 入手。
-
-```java
-@Override
-public <T extends Annotation> T getAnnotation(Class<T> annotationClass) {
-    Objects.requireNonNull(annotationClass);
-    
-    // 从 declaredAnnotations 获取对应类的 Annotation 对象。
-    // 因为 get 方法返回的是 Annotation 即父接口对象。
-    // 所以将返回的 Annotation 对象转换成指定的注解类对象（相当于强转）。
-    return annotationClass.cast(declaredAnnotations().get(annotationClass));
-}
-```
-
-
-
-发现它实际上是执行了 declaredAnnotations() 方法来查找修饰 Field 的注解。对这个方法的分析如下：
-
-```java
-private Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
-        Map<Class<? extends Annotation>, Annotation> declAnnos;
-    
-        // 这用了 Double Checked Locking 的机制，用来检查是否有了缓存。
-        // 如果有了缓存，就不需要加锁创建缓存了。
-        // 这主要是为了防止多线程同时调用这一方法产生的混乱。
-        if ((declAnnos = declaredAnnotations) == null) {
-            synchronized (this) {
-                if ((declAnnos = declaredAnnotations) == null) {
-                    // Class 的 getField 等方法返回的是经过复制的 Field 对象，
-                    // 这是为了找到最初由运行时生成的 Field 对象
-                    Field root = this.root;
-                    if (root != null) {
-                        declAnnos = root.declaredAnnotations();
-                    } else {
-                        // 但是，无论是什么情况，最终都要调用到这里。
-                        // 这将注解的解析交给了 AnnotationParser 处理。
-                        declAnnos = AnnotationParser.parseAnnotations(
-                                annotations,
-                                SharedSecrets.getJavaLangAccess()
-                                        .getConstantPool(getDeclaringClass()),
-                                getDeclaringClass());
-                    }
-                    
-                    // 将获取到的注解缓存起来。
-                    declaredAnnotations = declAnnos;
-                }
-            }
-        }
-        return declAnnos;
-    }
-```
-
-
-
-对 Field 中的 declaredAnnotation() 方法中的的语句打断点，进行 Debug。根据 Variables，我们获取到这个 Field 的 annotations 的值：
-
-![image-20210210174901846](image-20210210174901846.png)
-
-
-
-将这个值抄写下来 （十六进制）：
-
-```
-00 01 00 67 00 01 00 60 73 00 68
-```
-
-
-
-再到 class 文件查找，发现是 class 文件的一部分。
-
-![image-20210210181034254](image-20210210181034254.png)
-
-根据上文对字节码的分析，这表示了注解的数据。
-
-
-
-接下来分析 parseAnnotations 方法 [5]。
-
-```java
-public static Map<Class<? extends Annotation>, Annotation> parseAnnotations(
-    byte[] rawAnnotations,
-    ConstantPool constPool,
-    Class<?> container) {
-    if (rawAnnotations == null)
-        return Collections.emptyMap();
-
-    try {
-        // 委派给 2 号方法。
-        return parseAnnotations2(rawAnnotations, constPool, container, null);
-    } catch(BufferUnderflowException e) {
-        throw new AnnotationFormatError("Unexpected end of annotations.");
-    } catch(IllegalArgumentException e) {
-        // Type mismatch in constant pool
-        throw new AnnotationFormatError(e);
-    }
-}
-
-// 2 号方法
-private static Map<Class<? extends Annotation>, Annotation> parseAnnotations2(
-                byte[] rawAnnotations,
-                ConstantPool constPool,
-                Class<?> container,
-                Class<? extends Annotation>[] selectAnnotationClasses) {
-        Map<Class<? extends Annotation>, Annotation> result =
-            new LinkedHashMap<Class<? extends Annotation>, Annotation>();
-        ByteBuffer buf = ByteBuffer.wrap(rawAnnotations);
-    	// 获取前两个字节 （确定多少个注解）
-        int numAnnotations = buf.getShort() & 0xFFFF;
-        for (int i = 0; i < numAnnotations; i++) {
-            // 委派给识别单个注解的 3 号方法。
-            Annotation a = parseAnnotation2(buf, 
-                                            constPool, 
-                                            container, 
-                                            false, selectAnnotationClasses);
-            if (a != null) {
-                Class<? extends Annotation> klass = a.annotationType();
-                if (AnnotationType.getInstance(klass).retention() == RetentionPolicy.RUNTIME &&
-                    result.put(klass, a) != null) {
-                        throw new AnnotationFormatError(
-                            "Duplicate annotation for class: "+klass+": " + a);
-                }
-            }
-        }
-        return result;
-    }
-
-// 识别单个注解的 3 号方法。
-private static Annotation parseAnnotation2(ByteBuffer buf,
-                                           ConstantPool constPool,
-                                           Class<?> container,
-                                           boolean exceptionOnMissingAnnotationClass,
-                                           Class<? extends Annotation>[] selectAnnotationClasses)
-{
-    // 获取注解的类型引用（常量池中注解类条目的序号）
-    int typeIndex = buf.getShort() & 0xFFFF;
-    Class<? extends Annotation> annotationClass = null;
-    String sig = "[unknown]";
-    try {
-        try {
-            // 获取常量池中注解类的对应类名
-            sig = constPool.getUTF8At(typeIndex);
-            // 将常量池表示转化为 Class 对象表示（并转化为 Annotation 的泛型）
-            annotationClass = (Class<? extends Annotation>)parseSig(sig, container);
-        } catch (IllegalArgumentException ex) {
-            // support obsolete early jsr175 format class files - 后向兼容
-            annotationClass = (Class<? extends Annotation>)constPool.getClassAt(typeIndex);
-        }
-    } catch (NoClassDefFoundError | TypeNotPresentException e) {
-        return null;
-        // 异常处理略
-    }
-    
-    // selectAnnotationClasses 根据上面的调用是 null，故不执行。
-    if (selectAnnotationClasses != null && 
-        !contains(selectAnnotationClasses, annotationClass)) {
-        skipAnnotation(buf, false);
-        return null;
-    }
-    
-    AnnotationType type = null;
-    try {
-        // 根据刚刚找到的注解类获取 AnnotationType 的实例（反射对象）。
-        type = AnnotationType.getInstance(annotationClass);
-    } catch (IllegalArgumentException e) {
-        skipAnnotation(buf, false);
-        return null;
-    }
-
-    Map<String, Class<?>> memberTypes = type.memberTypes();
-    Map<String, Object> memberValues =
-        new LinkedHashMap<String, Object>(type.memberDefaults());
-
-    int numMembers = buf.getShort() & 0xFFFF;
-    for (int i = 0; i < numMembers; i++) {
-        int memberNameIndex = buf.getShort() & 0xFFFF;
-        String memberName = constPool.getUTF8At(memberNameIndex);
-        Class<?> memberType = memberTypes.get(memberName);
-
-        if (memberType == null) {
-            // Member is no longer present in annotation type; ignore it
-            skipMemberValue(buf);
-        } else {
-            Object value = parseMemberValue(memberType, buf, constPool, container);
-            if (value instanceof AnnotationTypeMismatchExceptionProxy)
-                ((AnnotationTypeMismatchExceptionProxy) value).
-                setMember(type.members().get(memberName));
-            memberValues.put(memberName, value);
-        }
-    }
-    return annotationForMap(annotationClass, memberValues);
-}
-
-```
+来到 annotationforMap 方法。
 
 ```java
 // 建立（刚刚识别的） Annotation 的动态代理对象。 
+// 参数：注解的 Class 对象，属性值。
 public static Annotation annotationForMap(final Class<? extends Annotation> type,
                                           final Map<String, Object> memberValues)
 {
     return AccessController.doPrivileged(new PrivilegedAction<Annotation>() {
         public Annotation run() {
-            // 
+            // 根据这个注解的类型和它的属性值生成了目标接口的一个代理类对象。
             return (Annotation) Proxy.newProxyInstance(
                 type.getClassLoader(), new Class<?>[] { type },
                 new AnnotationInvocationHandler(type, memberValues));
@@ -837,93 +1004,65 @@ public static Annotation annotationForMap(final Class<? extends Annotation> type
 
 
 
-```java
-public static AnnotationType getInstance(
-    Class<? extends Annotation> annotationClass)
-{
-    JavaLangAccess jla = SharedSecrets.getJavaLangAccess();
-    AnnotationType result = jla.getAnnotationType(annotationClass); // volatile read
-    if (result == null) {
-        result = new AnnotationType(annotationClass);
-        // try to CAS the AnnotationType: null -> result
-        if (!jla.casAnnotationType(annotationClass, null, result)) {
-            // somebody was quicker -> read it's result
-            result = jla.getAnnotationType(annotationClass);
-            assert result != null;
-        }
-    }
-
-    return result;
-}
-```
-```java
-private AnnotationType(final Class<? extends Annotation> annotationClass) {
-        if (!annotationClass.isAnnotation())
-            throw new IllegalArgumentException("Not an annotation type");
-
-        Method[] methods =
-            AccessController.doPrivileged(new PrivilegedAction<>() {
-                public Method[] run() {
-                    // Initialize memberTypes and defaultValues
-                    return annotationClass.getDeclaredMethods();
-                }
-            });
-
-        memberTypes = new HashMap<>(methods.length+1, 1.0f);
-        memberDefaults = new HashMap<>(0);
-        members = new HashMap<>(methods.length+1, 1.0f);
-
-        for (Method method : methods) {
-            if (Modifier.isPublic(method.getModifiers()) &&
-                Modifier.isAbstract(method.getModifiers()) &&
-                !method.isSynthetic()) {
-                if (method.getParameterCount() != 0) {
-                    throw new IllegalArgumentException(method + " has params");
-                }
-                String name = method.getName();
-                Class<?> type = method.getReturnType();
-                memberTypes.put(name, invocationHandlerReturnType(type));
-                members.put(name, method);
-
-                Object defaultValue = method.getDefaultValue();
-                if (defaultValue != null) {
-                    memberDefaults.put(name, defaultValue);
-                }
-            }
-        }
-
-        // Initialize retention, & inherited fields.  Special treatment
-        // of the corresponding annotation types breaks infinite recursion.
-        if (annotationClass != Retention.class &&
-            annotationClass != Inherited.class) {
-            JavaLangAccess jla = SharedSecrets.getJavaLangAccess();
-            Map<Class<? extends Annotation>, Annotation> metaAnnotations =
-                AnnotationParser.parseSelectAnnotations(
-                    jla.getRawClassAnnotations(annotationClass),
-                    jla.getConstantPool(annotationClass),
-                    annotationClass,
-                    Retention.class, Inherited.class
-                );
-            Retention ret = (Retention) metaAnnotations.get(Retention.class);
-            retention = (ret == null ? RetentionPolicy.CLASS : ret.value());
-            inherited = metaAnnotations.containsKey(Inherited.class);
-        }
-        else {
-            retention = RetentionPolicy.RUNTIME;
-            inherited = false;
-        }
-    }
-```
-
-
+由此可见注解的方法调用的有关行为都交给了 AnnotationInvocationHandler 这一 InvocationHandler （行为封装）。
 
 
 
 ## 注解的动态代理对象行为的分析
 
-（AnnotationInvocationHandler）
+根据上述信息，我们来到 AnnotationInvocationHandler 这个类 [6]。
 
-根据上述信息
+首先来看下这个类的结构。
+
+![image-20210211230208210](image-20210211230208210.png)
+
+![image-20210211230245972](image-20210211230245972.png)
+
+
+
+我们先从 invoke 方法入手。
+
+
+
+```java
+public Object invoke(Object proxy, Method method, Object[] args) {
+    // 方法名和方法参数的个数
+    String member = method.getName();
+    int parameterCount = method.getParameterCount();
+
+    // Handle Object and Annotation methods - Object 的方法和 Annotation 的方法
+    if (parameterCount == 1 && member == "equals" &&
+        method.getParameterTypes()[0] == Object.class) {
+        return equalsImpl(proxy, args[0]);
+    }
+    if (parameterCount != 0) {
+        throw new AssertionError("Too many parameters for an annotation method");
+    }
+
+    if (member == "toString") {
+        return toStringImpl();
+    } else if (member == "hashCode") {
+        return hashCodeImpl();
+    } else if (member == "annotationType") {
+        return type;
+    }
+
+    // Handle annotation member accessors
+    // 我们定义的
+    Object result = memberValues.get(member);
+
+    if (result == null)
+        throw new IncompleteAnnotationException(type, member);
+
+    if (result instanceof ExceptionProxy)
+        throw ((ExceptionProxy) result).generateException();
+
+    if (result.getClass().isArray() && Array.getLength(result) != 0)
+        result = cloneArray(result);
+
+    return result;
+}
+```
 
 
 
@@ -931,6 +1070,7 @@ private AnnotationType(final Class<? extends Annotation> annotationClass) {
 备注：
 
 1. 使用 Oracle OpenJDK 15 编译，并启动了预览功能。
+2. SharedSecrets 以及一系列 Access 结尾的接口主要是为了能让内部实现包（即不是 java 和 javax 开头的那些包）能够不使用反射地访问到 java 和 javax 的包当中没有公开的方法（即包访问控制符的那些方法）。这些接口的实现比较分散，但是几乎都是在某个类的一个方法中调用 SharedSecrets.setXXXAccess （并传入一个匿名内部类）。比如 JavaLangAccess 的实现在 System 类的 setJavaLangAccess() 当中的一个匿名内部类。这解决了访问控制符的语法规定和内部实现类跨包访问的矛盾。
 
 --------
 
@@ -965,6 +1105,10 @@ https://blog.csdn.net/zyq8514700/article/details/99892329
 [5] openJDK - sun.reflect.annotation.AnnotationParser
 
 https://github.com/openjdk/jdk15/blob/master/src/java.base/share/classes/sun/reflect/annotation/AnnotationParser.java
+
+[6] openJDK - sun.reflect.annotation.AnnotationInvocationHandler
+
+https://github.com/openjdk/jdk15/blob/master/src/java.base/share/classes/sun/reflect/annotation/AnnotationInvocationHandler.java
 
 </small>
 
