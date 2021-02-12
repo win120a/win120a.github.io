@@ -44,7 +44,7 @@ public @interface TestClassFileAnnotation {
 
 <br />
 
-（只能被 APT 处理）
+（只能被编译器的 APT 处理）
 
 ```java
 @Target(ElementType.TYPE)
@@ -128,7 +128,7 @@ RuntimeVisibleAnnotations:
 
 ![](image-20210207211719053.png)
 
-![The "Class File structure" section of The Java Virtual Machine Specification](image-20210207211731050.png)
+![The "access_flags" part of Class File structure" section of The Java Virtual Machine Specification](image-20210207211731050.png)
 
 根据 javap 的输出 中的 flags： 
 
@@ -172,7 +172,7 @@ public class Class2 {
 
 对这个类进行编译，反编译的结果如下：
 
-![](1.jpg)
+![Decompiling Result](1.jpg)
 
 
 
@@ -195,14 +195,16 @@ public class Class2 {
         ListBuffer<Attribute.Compound> visibles = new ListBuffer<>();
         ListBuffer<Attribute.Compound> invisibles = new ListBuffer<>();
         for (Attribute.Compound a : attrs) {
+            // 根据 Retention 的属性决定写入到哪个属性表。
             switch (types.getRetention(a)) {
-            case SOURCE: break;
-            case CLASS: invisibles.append(a); break;
-            case RUNTIME: visibles.append(a); break;
-            default: // /* fail soft */ throw new AssertionError(vis);
+                case SOURCE: break;
+                case CLASS: invisibles.append(a); break;
+                case RUNTIME: visibles.append(a); break;
+                default: // /* fail soft */ throw new AssertionError(vis);
             }
         }
 
+        // 根据刚刚判定的结果写入到 class 文件的属性表
         int attrCount = 0;
         if (visibles.length() != 0) {
             int attrIndex = writeAttr(names.RuntimeVisibleAnnotations);
@@ -212,6 +214,7 @@ public class Class2 {
             endAttr(attrIndex);
             attrCount++;
         }
+        
         if (invisibles.length() != 0) {
             // ....
         }
@@ -311,7 +314,7 @@ RuntimeInvisibleAnnotations:
 
 根据 Class 文件格式规范 [1]
 
-![image-20210210182932733](image-20210210182932733.png)
+!["The ClassFile Structure" section of The Java Virtual Machine Specification](image-20210210182932733.png)
 
 我们发现常量池之后出现的元素的声明的顺序分别是：类本身的有关信息、Field 的信息、方法的信息和修饰在这个类的属性。
 
@@ -319,7 +322,7 @@ RuntimeInvisibleAnnotations:
 
 我们打开 class 文件，按这个顺序进行人工解析：
 
-![](微信截图_20210210181914.png)
+![Manual Interpreting of Class file](微信截图_20210210181914.png)
 
 
 
@@ -329,13 +332,13 @@ RuntimeInvisibleAnnotations:
 
 根据 Java 虚拟机规范 [1]：
 
-![](image-20210210225153064.png)
+![The format of RuntimeVisibleAnnotations attribute of The Java Virtual Machine Specification](image-20210210225153064.png)
 
 
 
 我们对这个属性进行进一步的拆分：
 
-![微信截图_20210210224839](微信截图_20210210224839.png)
+![Manual Splitting of byte code](微信截图_20210210224839.png)
 
 
 
@@ -437,7 +440,7 @@ Class name of anotherAnnotationObjectOfClass: com.sun.proxy.$Proxy2
 
 
 ## Java 标准库对注解的解析
-### 注解的识别
+### Field 的 getAnnotation 方法
 
 回到 “运行时类型探秘” 的测试类。
 
@@ -468,7 +471,9 @@ public <T extends Annotation> T getAnnotation(Class<T> annotationClass) {
 
 
 
-发现它实际上是执行了 declaredAnnotations() 方法来查找修饰 Field 的注解。对这个方法的分析如下：
+###   查找修饰 Field 的注解 - declaredAnnotations() 方法
+
+对这个方法的分析如下：
 
 ```java
 private Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
@@ -491,7 +496,7 @@ private Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
                     declAnnos = AnnotationParser.parseAnnotations(
                         annotations,
                         SharedSecrets.getJavaLangAccess()
-                        .getConstantPool(getDeclaringClass()),
+                            .getConstantPool(getDeclaringClass()),
                         getDeclaringClass());
                 }
 
@@ -528,7 +533,11 @@ private Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
 
 
 
-接下来分析 parseAnnotations 方法 [5]。
+### 分析注解数据的方法 - parseAnnotation 系列方法
+
+#### parseAnnotations - 解析多个注解的入口方法
+
+接下来分析 parseAnnotations 方法 [4]。
 
 ```java
 public static Map<Class<? extends Annotation>, Annotation> parseAnnotations(
@@ -548,37 +557,48 @@ public static Map<Class<? extends Annotation>, Annotation> parseAnnotations(
         throw new AnnotationFormatError(e);
     }
 }
+```
 
+
+
+#### 解析多个注解的 2 号方法 - parseAnnotations2
+
+```java
 // 2 号方法
 private static Map<Class<? extends Annotation>, Annotation> parseAnnotations2(
-                byte[] rawAnnotations,
-                ConstantPool constPool,
-                Class<?> container,
-                Class<? extends Annotation>[] selectAnnotationClasses) {
-        Map<Class<? extends Annotation>, Annotation> result =
-            new LinkedHashMap<Class<? extends Annotation>, Annotation>();
-        ByteBuffer buf = ByteBuffer.wrap(rawAnnotations);
-    	// 获取前两个字节 （确定多少个注解）
-        int numAnnotations = buf.getShort() & 0xFFFF;
-        for (int i = 0; i < numAnnotations; i++) {
-            // 委派给识别单个注解的 3 号方法。
-            Annotation a = parseAnnotation2(buf, 
-                                            constPool, 
-                                            container, 
-                                            false, selectAnnotationClasses);
-            if (a != null) {
-                Class<? extends Annotation> klass = a.annotationType();
-                if (AnnotationType.getInstance(klass).retention() == RetentionPolicy.RUNTIME &&
-                    result.put(klass, a) != null) {
-                        throw new AnnotationFormatError(
-                            "Duplicate annotation for class: "+klass+": " + a);
-                }
+    byte[] rawAnnotations,
+    ConstantPool constPool,
+    Class<?> container,
+    Class<? extends Annotation>[] selectAnnotationClasses) {
+    Map<Class<? extends Annotation>, Annotation> result =
+        new LinkedHashMap<Class<? extends Annotation>, Annotation>();
+    ByteBuffer buf = ByteBuffer.wrap(rawAnnotations);
+    // 获取前两个字节 （确定多少个注解）
+    int numAnnotations = buf.getShort() & 0xFFFF;
+    for (int i = 0; i < numAnnotations; i++) {
+        // 委派给识别单个注解的 3 号方法。
+        Annotation a = parseAnnotation2(buf, 
+                                        constPool, 
+                                        container, 
+                                        false, selectAnnotationClasses);
+        if (a != null) {
+            Class<? extends Annotation> klass = a.annotationType();
+            if (AnnotationType.getInstance(klass).retention() == 
+                RetentionPolicy.RUNTIME && result.put(klass, a) != null) {
+                throw new AnnotationFormatError(
+                    "Duplicate annotation for class: "+klass+": " + a);
             }
         }
-        return result;
     }
+    return result;
+}
+```
 
-// 解析单个注解的 3 号方法。
+
+
+#### 解析单个注解的 3 号方法 - parseAnnotation2
+
+```java
 private static Annotation parseAnnotation2(ByteBuffer buf,
                                            ConstantPool constPool,
                                            Class<?> container,
@@ -624,6 +644,8 @@ private static Annotation parseAnnotation2(ByteBuffer buf,
 
     // 根据刚刚建立的 AnnotationType 的实例填充有关信息。
     Map<String, Class<?>> memberTypes = type.memberTypes();
+    
+    // 这会在生成一个 LinkedHashMap 的同时把默认值给填充进来。
     Map<String, Object> memberValues =
         new LinkedHashMap<String, Object>(type.memberDefaults());
 
@@ -653,7 +675,6 @@ private static Annotation parseAnnotation2(ByteBuffer buf,
     // 详见 “注解的运行时对象的生成”
     return annotationForMap(annotationClass, memberValues);
 }
-
 ```
 
 
@@ -694,9 +715,11 @@ public static Object parseMemberValue(Class<?> memberType,
 
 
 
-### AnnotationType 反射对象的建立
+### AnnotationType 反射对象的建立 [5]
 
-根据上文的，AnnotationType 的主要作用是用来保存这个注解的共有信息的。比如这个注解属性的键。
+根据上文，AnnotationType 的主要作用是用来保存这个注解的共有信息的。比如这个注解属性的键。
+
+#### getInstance() 工厂方法
 
 ```java
 public static AnnotationType getInstance(
@@ -733,6 +756,11 @@ public static AnnotationType getInstance(
     return result;
 }
 ```
+
+
+
+#### AnnotationType 的私有构造器
+
 ```java
 private AnnotationType(final Class<? extends Annotation> annotationClass) {
     if (!annotationClass.isAnnotation())
@@ -808,7 +836,7 @@ private AnnotationType(final Class<? extends Annotation> annotationClass) {
 
 
 
-## 注解的运行时对象的生成
+## 注解的运行时对象（动态代理对象）的生成
 ### 动态代理的回顾
 
 在分析注解运行时对象的行为之前，我们先来用一个案例简要回顾一下动态代理的行为。
@@ -870,7 +898,7 @@ interface Action {
  */
 public class TestInvocationHandler {
     public static void main(String[] args) {
-        // 让动态代理机制写入生成的中间 class 文件到硬盘。[4]
+        // 让动态代理机制写入生成的中间 class 文件到硬盘。[6]
         System.getProperties().put("jdk.proxy.ProxyGenerator.saveGeneratedFiles", "true");
 
         // 创建一个基于 Action 接口的动态代理类。
@@ -1010,19 +1038,19 @@ public static Annotation annotationForMap(final Class<? extends Annotation> type
 
 ## 注解的动态代理对象行为的分析
 
-根据上述信息，我们来到 AnnotationInvocationHandler 这个类 [6]。
+根据上述信息，我们来到 AnnotationInvocationHandler 这个类 [7]。
 
 首先来看下这个类的结构。
 
-![image-20210211230208210](image-20210211230208210.png)
+![](image-20210211230208210.png)
 
-![image-20210211230245972](image-20210211230245972.png)
+![Structure of AnnotationInvocationHandler](image-20210211230245972.png)
 
-
-
-我们先从 invoke 方法入手。
+我们可以看见有很多的方法（主要是 hashCode 等方法的实现）下面我们来逐一分析。
 
 
+
+### 动态代理对象总的行为 - invoke 方法
 
 ```java
 public Object invoke(Object proxy, Method method, Object[] args) {
@@ -1030,7 +1058,10 @@ public Object invoke(Object proxy, Method method, Object[] args) {
     String member = method.getName();
     int parameterCount = method.getParameterCount();
 
-    // Handle Object and Annotation methods - Object 的方法和 Annotation 的方法
+    // Handle Object and Annotation methods - Object 定义的方法和 Annotation 的方法
+    
+    
+    // equals(Object)
     if (parameterCount == 1 && member == "equals" &&
         method.getParameterTypes()[0] == Object.class) {
         return equalsImpl(proxy, args[0]);
@@ -1040,15 +1071,19 @@ public Object invoke(Object proxy, Method method, Object[] args) {
     }
 
     if (member == "toString") {
+        // toString() 方法
         return toStringImpl();
     } else if (member == "hashCode") {
+        // hashCode() 方法
         return hashCodeImpl();
     } else if (member == "annotationType") {
+        // annotationType() 方法
         return type;
     }
 
     // Handle annotation member accessors
-    // 我们定义的
+    // 我们定义的注解的属性
+    // 根据我们从 AnnotationParser 获取到的属性值，来返回最终的值。
     Object result = memberValues.get(member);
 
     if (result == null)
@@ -1057,6 +1092,7 @@ public Object invoke(Object proxy, Method method, Object[] args) {
     if (result instanceof ExceptionProxy)
         throw ((ExceptionProxy) result).generateException();
 
+    // 为了防止数组被修改，先复制出来再次返回
     if (result.getClass().isArray() && Array.getLength(result) != 0)
         result = cloneArray(result);
 
@@ -1066,11 +1102,118 @@ public Object invoke(Object proxy, Method method, Object[] args) {
 
 
 
+### hashCode 方法的实现 - hashCodeImpl()
+
+```java
+private int hashCodeImpl() {
+    int result = 0;
+    // 对每一个属性进行 hash 运算。
+    for (Map.Entry<String, Object> e : memberValues.entrySet()) {
+        result += (127 * e.getKey().hashCode()) ^
+            memberValueHashCode(e.getValue());
+    }
+    return result;
+}
+```
+
+
+
+我们发现 result += ... 的这句话的做法非常像 HashMap 的 hash 方法：
+
+```java
+/**
+* Computes key.hashCode() and spreads (XORs) higher bits of hash
+* to lower.  Because the table uses power-of-two masking, sets of
+* hashes that vary only in bits above the current mask will
+* always collide. (Among known examples are sets of Float keys
+* holding consecutive whole numbers in small tables.)  So we
+* apply a transform that spreads the impact of higher bits
+* downward. There is a tradeoff between speed, utility, and
+* quality of bit-spreading. Because many common sets of hashes
+* are already reasonably distributed (so don't benefit from
+* spreading), and because we use trees to handle large sets of
+* collisions in bins, we just XOR some shifted bits in the
+* cheapest possible way to reduce systematic lossage, as well as
+* to incorporate impact of the highest bits that would otherwise
+* never be used in index calculations because of table bounds.
+*/
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+```
+
+
+
+hash 方法主要是通过将高 16 位无符号右移 16 位跟低位对齐，并对低 16 位进行异或操作（用异或的原因见备注 3）。这个操作的主要目的是防止 hash 冲突。
+
+
+
+而注解的 hashCodeImpl 的意图是对键值对的 hash 值进行均匀混合。
+
+
+
+### equals 方法的实现 - equalsImpl(Object, Object)
+
+```java
+private Boolean equalsImpl(Object proxy, Object o) {
+    if (o == proxy)
+        return true;
+
+    if (!type.isInstance(o))
+        return false;
+    for (Method memberMethod : getMemberMethods()) {
+        String member = memberMethod.getName();
+        Object ourValue = memberValues.get(member);
+        Object hisValue = null;
+        AnnotationInvocationHandler hisHandler = asOneOfUs(o);
+        if (hisHandler != null) {
+            hisValue = hisHandler.memberValues.get(member);
+        } else {
+            try {
+                hisValue = memberMethod.invoke(o);
+            } catch (InvocationTargetException e) {
+                return false;
+            } catch (IllegalAccessException e) {
+                throw new AssertionError(e);
+            }
+        }
+        if (!memberValueEquals(ourValue, hisValue))
+            return false;
+    }
+    return true;
+}
+```
+
+## 本文所提到有关注解的 Java 标准库的 UML 图
+
+![UML Diagram of annotation-related classes in STL of Java](AnnotationInvocationHandler.png)
+
+
 --------
 备注：
 
 1. 使用 Oracle OpenJDK 15 编译，并启动了预览功能。
+
 2. SharedSecrets 以及一系列 Access 结尾的接口主要是为了能让内部实现包（即不是 java 和 javax 开头的那些包）能够不使用反射地访问到 java 和 javax 的包当中没有公开的方法（即包访问控制符的那些方法）。这些接口的实现比较分散，但是几乎都是在某个类的一个方法中调用 SharedSecrets.setXXXAccess （并传入一个匿名内部类）。比如 JavaLangAccess 的实现在 System 类的 setJavaLangAccess() 当中的一个匿名内部类。这解决了访问控制符的语法规定和内部实现类跨包访问的矛盾。
+
+3. 进行异或操作的主要原因是它产生的结果的概率是相等的。
+
+   因为根据真值表：
+
+   ```
+       X  |  Y  |  输出 (X ^ Y)
+       1  |  0  |  1
+       0  |  1  |  1
+       1  |  1  |  0
+       0  |  0  |  0
+   ```
+
+   P (X ^ Y = 1) = 2 / 4 = 1 / 2
+   
+   P (X ^ Y = 0) = 2 / 4 = 1 / 2
+   
+   两者相等。
 
 --------
 
@@ -1098,15 +1241,19 @@ https://github.com/openjdk/jdk15/blob/master/src/jdk.compiler/share/classes/com/
 
 https://github.com/openjdk/jdk15/blob/master/src/java.base/share/classes/java/lang/reflect/Field.java
 
-[4] JDK动态代理生成的class文件保存到本地失败问题（sun.misc.ProxyGenerator.saveGeneratedFiles）
-
-https://blog.csdn.net/zyq8514700/article/details/99892329
-
-[5] openJDK - sun.reflect.annotation.AnnotationParser
+[4] openJDK - sun.reflect.annotation.AnnotationParser
 
 https://github.com/openjdk/jdk15/blob/master/src/java.base/share/classes/sun/reflect/annotation/AnnotationParser.java
 
-[6] openJDK - sun.reflect.annotation.AnnotationInvocationHandler
+[5] openJDK - sun.reflect.annotation.AnnotationType
+
+https://github.com/openjdk/jdk15/blob/master/src/java.base/share/classes/sun/reflect/annotation/AnnotationType.java
+
+[6] JDK动态代理生成的class文件保存到本地失败问题（sun.misc.ProxyGenerator.saveGeneratedFiles）
+
+https://blog.csdn.net/zyq8514700/article/details/99892329
+
+[7] openJDK - sun.reflect.annotation.AnnotationInvocationHandler
 
 https://github.com/openjdk/jdk15/blob/master/src/java.base/share/classes/sun/reflect/annotation/AnnotationInvocationHandler.java
 
