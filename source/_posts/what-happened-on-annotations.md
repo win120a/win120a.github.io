@@ -17,6 +17,7 @@ public @interface TestRuntimeVisibleAnnotation {
     String pathInResources();
 }
 ```
+
 <br />
 ```java
 @Target({ElementType.TYPE, ElementType.FIELD})
@@ -126,9 +127,9 @@ RuntimeVisibleAnnotations:
 
 根据 Java 虚拟机规范 [1]，class 文件的 access_flags 决定了这个类（或变量等）的性质以及访问的权限。
 
-![](image-20210207211719053.png)
+![](jvms_af_1.png)
 
-![The "access_flags" part of Class File structure" section of The Java Virtual Machine Specification](image-20210207211731050.png)
+![The "access_flags" part of Class File structure" section of The Java Virtual Machine Specification](jvms_af_2.png)
 
 根据 javap 的输出 中的 flags： 
 
@@ -172,7 +173,7 @@ public class Class2 {
 
 对这个类进行编译，反编译的结果如下：
 
-![Decompiling Result](1.jpg)
+![Decompiling Result](decompilingResult.jpg)
 
 
 
@@ -314,7 +315,7 @@ RuntimeInvisibleAnnotations:
 
 根据 Class 文件格式规范 [1]
 
-!["The ClassFile Structure" section of The Java Virtual Machine Specification](image-20210210182932733.png)
+!["The ClassFile Structure" section of The Java Virtual Machine Specification](jvms_classfile.png)
 
 我们发现常量池之后出现的元素的声明的顺序分别是：类本身的有关信息、Field 的信息、方法的信息和修饰在这个类的属性。
 
@@ -322,7 +323,7 @@ RuntimeInvisibleAnnotations:
 
 我们打开 class 文件，按这个顺序进行人工解析：
 
-![Manual Interpreting of Class file](微信截图_20210210181914.png)
+![Manual Interpreting of Class file](manualInterpreting1.png)
 
 
 
@@ -332,13 +333,13 @@ RuntimeInvisibleAnnotations:
 
 根据 Java 虚拟机规范 [1]：
 
-![The format of RuntimeVisibleAnnotations attribute of The Java Virtual Machine Specification](image-20210210225153064.png)
+![The format of RuntimeVisibleAnnotations attribute of The Java Virtual Machine Specification](jvms_rtva.png)
 
 
 
 我们对这个属性进行进一步的拆分：
 
-![Manual Splitting of byte code](微信截图_20210210224839.png)
+![Manual Splitting of byte code](manualInterpreting2.png)
 
 
 
@@ -513,7 +514,7 @@ private Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
 
 对 Field 中的 declaredAnnotation() 方法中的的语句打断点，进行 Debug。根据 Variables，我们获取到这个 Field 的 annotations 的值：
 
-![image-20210210174901846](image-20210210174901846.png)
+![Value of "annotations"](annotationsValue.png)
 
 
 
@@ -527,7 +528,7 @@ private Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
 
 根据上文，这是 RuntimeVisibleAnnotations 的属性值。
 
-![image-20210210181034254](image-20210210181034254.png)
+![Looking up the value](lookup.png)
 
 这表示了注解的数据。
 
@@ -933,7 +934,7 @@ ac.testproj.invoke.$Proxy0
 
 运行后工作目录出现了生成的 class 文件：
 
-![Generated proxy class file [Fig. (Sect. Proxy) 1, 20210208]](image-20210208234414843.png)
+![Generated proxy class file [Fig. (Sect. Proxy) 1, 20210208]](generatedFile.png)
 
 
 
@@ -1042,9 +1043,9 @@ public static Annotation annotationForMap(final Class<? extends Annotation> type
 
 首先来看下这个类的结构。
 
-![](image-20210211230208210.png)
+![](invocationHandler1.png)
 
-![Structure of AnnotationInvocationHandler](image-20210211230245972.png)
+![Structure of AnnotationInvocationHandler](invocationHandler2.png)
 
 我们可以看见有很多的方法（主要是 hashCode 等方法的实现）下面我们来逐一分析。
 
@@ -1092,7 +1093,7 @@ public Object invoke(Object proxy, Method method, Object[] args) {
     if (result instanceof ExceptionProxy)
         throw ((ExceptionProxy) result).generateException();
 
-    // 为了防止数组被修改，先复制出来再次返回
+    // 为了防止数组被修改，先复制出来再返回
     if (result.getClass().isArray() && Array.getLength(result) != 0)
         result = cloneArray(result);
 
@@ -1187,7 +1188,7 @@ private Boolean equalsImpl(Object proxy, Object o) {
 
 ## 本文所提到有关注解的 Java 标准库的 UML 图
 
-![UML Diagram of annotation-related classes in STL of Java](AnnotationInvocationHandler.png)
+![UML Diagram of annotation-related classes in STL of Java](uml.png)
 
 
 --------
