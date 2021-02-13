@@ -32,8 +32,6 @@ public @interface RuntimeVisibleAnnotation2 {
 
 
 
-<br />
-
 （出现于 class 文件）
 
 ```java
@@ -181,46 +179,46 @@ public class Class2 {
 
 
 
-由这一过程可以看到，javac 并没有把这个注解写入 class 文件里头。打开 [javac 写入 class 文件的代码 [2]](https://github.com/openjdk/jdk15/blob/master/src/jdk.compiler/share/classes/com/sun/tools/javac/jvm/ClassWriter.java)，并定位到 473 行的 writeJavaAnnotations() 的部分代码如下：
+由这一过程可以看到，javac 并没有把这个注解写入 class 文件里头。打开 javac 写入 class 文件的代码 [2]，并定位到 473 行的 writeJavaAnnotations() 的部分代码如下：
 
 ```java
 /**********************************************************************
  * Writing Java-language annotations (aka metadata, attributes)
  **********************************************************************/
 
-    /** Write Java-language annotations; return number of JVM
-     *  attributes written (zero or one).
-     */
-    int writeJavaAnnotations(List<Attribute.Compound> attrs) {
-        if (attrs.isEmpty()) return 0;
-        ListBuffer<Attribute.Compound> visibles = new ListBuffer<>();
-        ListBuffer<Attribute.Compound> invisibles = new ListBuffer<>();
-        for (Attribute.Compound a : attrs) {
-            // 根据 Retention 的属性决定写入到哪个属性表。
-            switch (types.getRetention(a)) {
-                case SOURCE: break;
-                case CLASS: invisibles.append(a); break;
-                case RUNTIME: visibles.append(a); break;
-                default: // /* fail soft */ throw new AssertionError(vis);
-            }
+/** Write Java-language annotations; return number of JVM
+ *  attributes written (zero or one).
+ */
+int writeJavaAnnotations(List<Attribute.Compound> attrs) {
+    if (attrs.isEmpty()) return 0;
+    ListBuffer<Attribute.Compound> visibles = new ListBuffer<>();
+    ListBuffer<Attribute.Compound> invisibles = new ListBuffer<>();
+    for (Attribute.Compound a : attrs) {
+        // 根据 Retention 的属性决定写入到哪个属性表。
+        switch (types.getRetention(a)) {
+            case SOURCE: break;
+            case CLASS: invisibles.append(a); break;
+            case RUNTIME: visibles.append(a); break;
+            default: // /* fail soft */ throw new AssertionError(vis);
         }
-
-        // 根据刚刚判定的结果写入到 class 文件的属性表
-        int attrCount = 0;
-        if (visibles.length() != 0) {
-            int attrIndex = writeAttr(names.RuntimeVisibleAnnotations);
-            databuf.appendChar(visibles.length());
-            for (Attribute.Compound a : visibles)
-                writeCompoundAttribute(a);
-            endAttr(attrIndex);
-            attrCount++;
-        }
-        
-        if (invisibles.length() != 0) {
-            // ....
-        }
-        return attrCount;
     }
+
+    // 根据刚刚判定的结果写入到 class 文件的属性表
+    int attrCount = 0;
+    if (visibles.length() != 0) {
+        int attrIndex = writeAttr(names.RuntimeVisibleAnnotations);
+        databuf.appendChar(visibles.length());
+        for (Attribute.Compound a : visibles)
+            writeCompoundAttribute(a);
+        endAttr(attrIndex);
+        attrCount++;
+    }
+
+    if (invisibles.length() != 0) {
+        // ....
+    }
+    return attrCount;
+}
 ```
 
 
@@ -321,7 +319,7 @@ RuntimeInvisibleAnnotations:
 
 
 
-我们打开 class 文件，按这个顺序进行人工解析：
+我们用十六进制编辑器打开 class 文件，按这个顺序进行人工解析：
 
 ![Manual Interpreting of Class file](manualInterpreting1.png)
 
@@ -689,8 +687,13 @@ public static Object parseMemberValue(Class<?> memberType,
                                           Class<?> container) {
     Object result = null;
     int tag = buf.get();
+    
+    // 根据对应 tag 进行不同类型属性值的获取。
+    // 但是基本上就是根据常量池和序号引用，并调用获取不同类别的实例进行操作。
+    // 具体的类型在 class 文件的存储办法可以参考 JVMS 
     switch(tag) {
         case 'e':
+            // 调用了 Enum.valueOf(enumType, constName);
             return parseEnumValue((Class<? extends Enum<?>>)memberType, buf, constPool, container);
         case 'c':
             result = parseClassValue(buf, constPool, container);
@@ -838,9 +841,11 @@ private AnnotationType(final Class<? extends Annotation> annotationClass) {
 
 
 ## 注解的运行时对象（动态代理对象）的生成
-### 动态代理的回顾
+根据上文对注解的分析，我们知道注解是一种特殊的接口。既然是接口，那么肯定就要有接口的实现。根据刚刚的分析，我们可以知道注解的运行时类型是一个动态代理对象。在分析注解的动态代理对象的具体行为之前，我们先来回顾一下动态代理。
 
-在分析注解运行时对象的行为之前，我们先来用一个案例简要回顾一下动态代理的行为。
+
+
+### 动态代理的回顾
 
 ```java
 package ac.testproj.invoke;
@@ -1123,21 +1128,21 @@ private int hashCodeImpl() {
 
 ```java
 /**
-* Computes key.hashCode() and spreads (XORs) higher bits of hash
-* to lower.  Because the table uses power-of-two masking, sets of
-* hashes that vary only in bits above the current mask will
-* always collide. (Among known examples are sets of Float keys
-* holding consecutive whole numbers in small tables.)  So we
-* apply a transform that spreads the impact of higher bits
-* downward. There is a tradeoff between speed, utility, and
-* quality of bit-spreading. Because many common sets of hashes
-* are already reasonably distributed (so don't benefit from
-* spreading), and because we use trees to handle large sets of
-* collisions in bins, we just XOR some shifted bits in the
-* cheapest possible way to reduce systematic lossage, as well as
-* to incorporate impact of the highest bits that would otherwise
-* never be used in index calculations because of table bounds.
-*/
+ * Computes key.hashCode() and spreads (XORs) higher bits of hash
+ * to lower.  Because the table uses power-of-two masking, sets of
+ * hashes that vary only in bits above the current mask will
+ * always collide. (Among known examples are sets of Float keys
+ * holding consecutive whole numbers in small tables.)  So we
+ * apply a transform that spreads the impact of higher bits
+ * downward. There is a tradeoff between speed, utility, and
+ * quality of bit-spreading. Because many common sets of hashes
+ * are already reasonably distributed (so don't benefit from
+ * spreading), and because we use trees to handle large sets of
+ * collisions in bins, we just XOR some shifted bits in the
+ * cheapest possible way to reduce systematic lossage, as well as
+ * to incorporate impact of the highest bits that would otherwise
+ * never be used in index calculations because of table bounds.
+ */
 static final int hash(Object key) {
     int h;
     return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
@@ -1146,7 +1151,7 @@ static final int hash(Object key) {
 
 
 
-hash 方法主要是通过将高 16 位无符号右移 16 位跟低位对齐，并对低 16 位进行异或操作（用异或的原因见备注 3）。这个操作的主要目的是防止 hash 冲突。
+hash 方法主要是通过将高 16 位无符号右移 16 位跟低 16 位对齐，并对低 16 位进行异或操作（用异或的原因见备注 3）。这个操作的主要目的是减缓在某些情况下的 hash 冲突。
 
 
 
@@ -1186,12 +1191,17 @@ private Boolean equalsImpl(Object proxy, Object o) {
 }
 ```
 
+
+
 ## 本文所提到有关注解的 Java 标准库的 UML 图
 
-![UML Diagram of annotation-related classes in STL of Java](uml.png)
+![UML Diagram of annotation-related classes in API of Java](uml.png)
+
+
 
 
 --------
+
 备注：
 
 1. 使用 Oracle OpenJDK 15 编译，并启动了预览功能。
@@ -1201,14 +1211,13 @@ private Boolean equalsImpl(Object proxy, Object o) {
 3. 进行异或操作的主要原因是它产生的结果的概率是相等的。
 
    因为根据真值表：
-
-   ```
-       X  |  Y  |  输出 (X ^ Y)
-       1  |  0  |  1
-       0  |  1  |  1
-       1  |  1  |  0
-       0  |  0  |  0
-   ```
+   
+   |  X   |  Y   | 输出 (X ^ Y) |
+   | :--: | :--: | :----------: |
+   |  1   |  0   |      1       |
+   |  0   |  1   |      1       |
+   |  1   |  1   |      0       |
+   |  0   |  0   |      0       |
 
    P (X ^ Y = 1) = 2 / 4 = 1 / 2
    
