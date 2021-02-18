@@ -1,8 +1,14 @@
 ---
-title: Java 注解 (Annotation) 从编译到运行时发生了什么
+title: 源码初探 | Java 注解 (Annotation) 从编译到运行时发生了什么
 date: 2021-01-27 22:48:31
 tags: OpenJDK 底层探究
 ---
+
+# 写作动机
+
+近期编写了一个基于注解的自动注入功能，于是就对 Java 的注解的工作原理产生了兴趣。下面是我对 Java 注解从编译时的行为到运行时提取注解的行为进行一定的分析，愿能解释 Java 注解的工作原理。
+
+
 
 # 全文约定
 
@@ -1124,7 +1130,7 @@ private int hashCodeImpl() {
 
 
 
-我们发现 result += ... 的这句话的做法非常像 HashMap 的 hash 方法：
+我们发现 result += ... 的这句话的做法非常像 HashMap 的 hash 方法 [8]：
 
 ```java
 /**
@@ -1199,6 +1205,24 @@ private Boolean equalsImpl(Object proxy, Object o) {
 
 
 
+# 总结
+
+1. 注解本身在 class 文件上来看是一种特殊的接口。
+2. 实际上使用注解的时候注解的有关信息是存在 class 文件被修饰元素部分的 Runtime(In)visibleAnnotations 的属性表里头的。
+3. 注解的解析逻辑在 sun.reflect.annotation.AnnotationParser 里头。
+4. 注解在运行时的对象是由动态代理产生的，其行为封装在 sun.reflect.annotation.AnnotationInvocationHandler 类里头，实现了被解析的注解这一 “接口” 。
+5. 注解本身在运行时里头也有个代表它本身，且用来存储共同信息的对象 sun.reflect.annotation.AnnotationType
+
+
+
+# 随感
+
+2021-01-27 22:48:31，这是这篇文章开始写的时间。
+
+
+
+
+
 
 --------
 
@@ -1266,6 +1290,10 @@ https://blog.csdn.net/zyq8514700/article/details/99892329
 [7] openJDK - sun.reflect.annotation.AnnotationInvocationHandler
 
 https://github.com/openjdk/jdk15/blob/master/src/java.base/share/classes/sun/reflect/annotation/AnnotationInvocationHandler.java
+
+[8] openJDK - java.util.HashMap
+
+https://github.com/openjdk/jdk15/blob/master/src/java.base/share/classes/java/util/HashMap.java
 
 </small>
 
