@@ -1,12 +1,12 @@
 ---
-title: 源码初探 | Java 注解 (Annotation) 从编译到运行时发生了什么
+title: 源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么
 date: 2021-01-27 22:48:31
 tags: OpenJDK 底层探究
 ---
 
 # 写作动机
 
-近期编写了一个基于注解的自动注入功能，于是就对 Java 的注解的工作原理产生了兴趣。下面是我对 Java 注解从编译时的行为到运行时提取注解的行为进行一定的分析，愿能解释 Java 注解的工作原理。
+近期编写了一个基于注解的自动注入功能，于是就对 Java 的注解的工作原理产生了兴趣。下面是我对 Java 注解从编译时的行为到运行时提取注解的行为进行一定的（Java 层面上的）分析，愿能解释 Java 注解的工作原理。
 
 
 
@@ -147,7 +147,7 @@ ACC_PUBLIC:  表示 public 访问权限。
 
 ACC_INTERFACE:  表示这是一个接口。
 
-ACC_ABSTRACT:  这是一个特殊的标识，表示这是抽象的（ACC_INTERFACE 存在时，这个也要存在）。
+ACC_ABSTRACT:  这是一个特殊的标识，表示这是抽象的（根据规范，ACC_INTERFACE 存在时，这个也要存在）。
 
 ACC_ANNOTAION:  表示这是一个注解对象。
 
@@ -757,7 +757,7 @@ public static AnnotationType getInstance(
         // 这是通过 CAS 确保只有一个线程修改 annotationType 变量
         if (!jla.casAnnotationType(annotationClass, null, result)) {
             // somebody was quicker -> read it's result
-            // 如上述注释，这就是说如果有线程修改好了就用它的结果。
+            // 如上述注释。如果有线程修改好了就用它的结果。
             result = jla.getAnnotationType(annotationClass);
             assert result != null;
         }
@@ -1028,7 +1028,7 @@ final class $Proxy0 extends Proxy implements Action {
 
 ```java
 // 建立（刚刚识别的） Annotation 的动态代理对象。 
-// 参数：注解的 Class 对象，属性值。
+// 参数列表：(注解的 Class 对象，属性值)
 public static Annotation annotationForMap(final Class<? extends Annotation> type,
                                           final Map<String, Object> memberValues)
 {
@@ -1172,12 +1172,17 @@ private Boolean equalsImpl(Object proxy, Object o) {
     if (o == proxy)
         return true;
 
+    // 看 o 是不是这个注解“接口”的实例（是不是这个注释的代理对象）。
+    // 相当于 if (!(o instanceof <type 的类型>))
     if (!type.isInstance(o))
         return false;
+    
+    // 属性值挨个比对，所有值相等才判 true
     for (Method memberMethod : getMemberMethods()) {
         String member = memberMethod.getName();
         Object ourValue = memberValues.get(member);
         Object hisValue = null;
+        // 判定是不是 AnnotationInvocationHandler 的实例，如果是的话，返回转换成它之后的对象
         AnnotationInvocationHandler hisHandler = asOneOfUs(o);
         if (hisHandler != null) {
             hisValue = hisHandler.memberValues.get(member);
@@ -1207,19 +1212,11 @@ private Boolean equalsImpl(Object proxy, Object o) {
 
 # 总结
 
-1. 注解本身在 class 文件上来看是一种特殊的接口。
+1. 注解本身在 class 文件上来看是一种特殊的接口，它的 “实现” 由动态代理和 AnnotationInvocationHandler 给予。
 2. 实际上使用注解的时候注解的有关信息是存在 class 文件被修饰元素部分的 Runtime(In)visibleAnnotations 的属性表里头的。
 3. 注解的解析逻辑在 sun.reflect.annotation.AnnotationParser 里头。
 4. 注解在运行时的对象是由动态代理产生的，其行为封装在 sun.reflect.annotation.AnnotationInvocationHandler 类里头，实现了被解析的注解这一 “接口” 。
 5. 注解本身在运行时里头也有个代表它本身，且用来存储共同信息的对象 sun.reflect.annotation.AnnotationType
-
-
-
-# 随感
-
-2021-01-27 22:48:31，这是这篇文章开始写的时间。
-
-
 
 
 
