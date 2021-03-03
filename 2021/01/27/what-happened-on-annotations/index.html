@@ -4,15 +4,34 @@
   <meta charset="utf-8">
   
   
-  <title>Andy&#39;s Blog</title>
+  <title>源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么 | Andy&#39;s Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-  <meta property="og:type" content="website">
-<meta property="og:title" content="Andy&#39;s Blog">
-<meta property="og:url" content="http://win120a.github.io/index.html">
+  <meta name="description" content="写作动机近期编写了一个基于注解的自动注入功能，于是就对 Java 的注解的工作原理产生了兴趣。下面是我对 Java 注解从编译时的行为到运行时提取注解的行为进行一定的（Java 层面上的）分析，愿能解释 Java 注解的工作原理。 全文约定定义注解如下： （运行时可见） 12345@Target(&amp;#123;ElementType.FIELD, ElementType.TYPE&amp;#125;)@Re">
+<meta property="og:type" content="article">
+<meta property="og:title" content="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么">
+<meta property="og:url" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/index.html">
 <meta property="og:site_name" content="Andy&#39;s Blog">
+<meta property="og:description" content="写作动机近期编写了一个基于注解的自动注入功能，于是就对 Java 的注解的工作原理产生了兴趣。下面是我对 Java 注解从编译时的行为到运行时提取注解的行为进行一定的（Java 层面上的）分析，愿能解释 Java 注解的工作原理。 全文约定定义注解如下： （运行时可见） 12345@Target(&amp;#123;ElementType.FIELD, ElementType.TYPE&amp;#125;)@Re">
 <meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/jvms_af_1.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/jvms_af_2.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/decompilingResult.jpg">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/jvms_classfile.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/manualInterpreting1.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/jvms_rtva.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/manualInterpreting2.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/annotationsValue.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/lookup.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/generatedFile.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/invocationHandler1.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/invocationHandler2.png">
+<meta property="og:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/uml.png">
+<meta property="article:published_time" content="2021-01-27T14:48:31.000Z">
+<meta property="article:modified_time" content="2021-03-03T14:42:53.696Z">
 <meta property="article:author" content="Andy Cheung">
+<meta property="article:tag" content="OpenJDK 底层探究">
 <meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http://win120a.github.io/2021/01/27/what-happened-on-annotations/jvms_af_1.png">
   
     <link rel="alternate" href="/atom.xml" title="Andy's Blog" type="application/atom+xml">
   
@@ -72,9 +91,7 @@
 </header>
 
       <div class="outer">
-        <section id="main">
-  
-    <article id="post-what-happened-on-annotations" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+        <section id="main"><article id="post-what-happened-on-annotations" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
   <div class="article-meta">
     <a href="/2021/01/27/what-happened-on-annotations/" class="article-date">
   <time class="dt-published" datetime="2021-01-27T14:48:31.000Z" itemprop="datePublished">2021-01-27</time>
@@ -87,8 +104,8 @@
       <header class="article-header">
         
   
-    <h1 itemprop="name">
-      <a class="p-name article-title" href="/2021/01/27/what-happened-on-annotations/">源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么</a>
+    <h1 class="p-name article-title" itemprop="headline name">
+      源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么
     </h1>
   
 
@@ -352,126 +369,19 @@
     </footer>
   </div>
   
-</article>
-
-
-
+    
+<nav id="article-nav">
   
-    <article id="post-tomcat-jndi" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
-  <div class="article-meta">
-    <a href="/2020/06/09/tomcat-jndi/" class="article-date">
-  <time class="dt-published" datetime="2020-06-09T16:00:00.000Z" itemprop="datePublished">2020-06-10</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
   
-    <h1 itemprop="name">
-      <a class="p-name article-title" href="/2020/06/09/tomcat-jndi/">Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理</a>
-    </h1>
+    <a href="/2020/06/09/tomcat-jndi/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">后一篇</strong>
+      <div class="article-nav-title">Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理</div>
+    </a>
   
+</nav>
 
-      </header>
-    
-    <div class="e-content article-entry" itemprop="articleBody">
-      
-        <p>重温一下我们在程序中使用 JNDI 配置的数据源的代码：</p>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">InitialContext ctx = <span class="keyword">null</span>;</span><br><span class="line">DataSource ds = <span class="keyword">null</span>;</span><br><span class="line"><span class="keyword">try</span> &#123;</span><br><span class="line">    ctx = <span class="keyword">new</span> InitialContext();</span><br><span class="line">    ds = (DataSource) ctx.lookup(<span class="string">&quot;java:comp/env/jdbc/eduDS&quot;</span>);</span><br><span class="line">&#125; <span class="keyword">catch</span> (NamingException e) &#123;</span><br><span class="line">    e.printStackTrace();</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">try</span> (Connection c = ds.getConnection()) &#123; ... &#125;</span><br></pre></td></tr></table></figure>
-
-
-<p>JNDI 是 Java 的一个组件。它是一个通过名字取得对象的一个接口。Tomcat 提供了它的其中一种实现，下面我们不妨来简单分析下这其中的原理。</p>
-<h1 id="0-JNDI-的一些概念"><a href="#0-JNDI-的一些概念" class="headerlink" title="0. JNDI 的一些概念"></a>0. JNDI 的一些概念</h1><p>在研究这一系列原理之前，我们先认识一下 JNDI 和它的几个对象。</p>
-<h2 id="JNDI-的概念与设计思想"><a href="#JNDI-的概念与设计思想" class="headerlink" title="JNDI 的概念与设计思想"></a>JNDI 的概念与设计思想</h2><p>JNDI 是 Java 命名与目录服务接口的英文简称。它主要是定义一批在 Java 的有关命名 / 目录服务的一系列接口（API / SPI）。JNDI 的结构设计与 JDBC 相仿，都是把对外接口 （API） 与具体实现 （SPI，在 JDBC 中叫驱动程序） 分离。</p>
-<h2 id="JNDI-在-JDK-中的位置"><a href="#JNDI-在-JDK-中的位置" class="headerlink" title="JNDI 在 JDK 中的位置"></a>JNDI 在 JDK 中的位置</h2><p>JNDI 的相关类和接口均位于 java.naming 模块的各个包中。其中我们主要操作的类在 javax.naming 这个包中。</p>
-<h2 id="JNDI-的几个常见对象"><a href="#JNDI-的几个常见对象" class="headerlink" title="JNDI 的几个常见对象"></a>JNDI 的几个常见对象</h2><p>(a)  <code>javax.naming.Context</code> 接口：在 JNDI 中表示一组绑定关系。</p>
-<p>(b)  <code>javax.naming.InitialContext</code> 类： JNDI 一系列操作的入口类，它更多的扮演着委托代理类的角色，把我们对这个类的调用“转发” 到实际指定的 Context 的实现类。</p>
-<p>(c)  <code>javax.naming.Name</code> 接口：代表命名服务中的“名字”。常见的实现类有 <code>CompositeName</code>。</p>
-<h1 id="1-InitialContext-的工作流程"><a href="#1-InitialContext-的工作流程" class="headerlink" title="1. InitialContext 的工作流程"></a>1. InitialContext 的工作流程</h1><p>InitialContext 是 JNDI 的一系列的操作的入口类，下面我们先分析下这个类的原理。</p>
-<p>①  调用构造器时，InitialContext 所做的事情（点开看大图）：</p>
-<p><img src="/2020/06/09/tomcat-jndi/1.png"></p>
-<p><img src="/2020/06/09/tomcat-jndi/2.png"></p>
-<p>②  调用 lookup 等 Context 接口定义的方法时，实际上发生的事情：</p>
-<p><img src="/2020/06/09/tomcat-jndi/3.png"></p>
-<p>我们可以看出，这主要是先判断这是不是一个 URL Context，然后再根据情况调用不同的方法。这调用了 InitialContext 的 getURLScheme 方法。</p>
-<p><img src="/2020/06/09/tomcat-jndi/getURLScheme.png"></p>
-<p>这段代码的意思是：如果有地址符合类似于“XX:XX/XX” 这样的形式的话，那么这是一个 URL Context。前言中的 “java:comp/env/jdbc/eduDS” 显然符合这种形式。那么 NamingManager 的 getURLContext 会被调用。</p>
-<p><img src="/2020/06/09/tomcat-jndi/getURLContext.png"></p>
-<p>我们不难看出它实际上是调用了 getURLObject 方法。</p>
-<p><img src="/2020/06/09/tomcat-jndi/getURLObject.png"></p>
-<p>它通过获取 Context.URL_PKG_PREFIXES 所对应的系统属性的值，来查找对应的工厂类，并创建它的实例（也会缓存）。根据 NamingManger 的文档综合整理可知：</p>
-<p><code>ResouceManager.getObjectInstance</code> 方法会根据 <code>Context.URL_PKG_PREFIXES</code> 对应的系统属性的值挨个查找对应 scheme 的类。而其是一个以冒号分隔开的属性，用于指定要查找的包。</p>
-<p>它查找的类符合这个规律：</p>
-<p>​    <code>&#123;其中一个包名&#125;.&#123;scheme&#125;.&#123;scheme&#125;URLContextFactory</code></p>
-<p>而 java 这个 scheme 对应的正好就是</p>
-<p>​     <code>xx.java.javaURLContextFactory</code> </p>
-<p>又因 <code>Context.URL_PKG_PREFIXES</code> 对应的系统属性给指定成了</p>
-<p>​    <code>org.apache.naming</code></p>
-<p>于是 <code>org.apache.naming.java.javaURLContextFactory</code> 就给匹配上了。</p>
-<p>从上面的代码可以证实，InitialContext 更多地是充当了一个委托代理的角色，把方法调用 “转发” 给实际指定的 Context 实现。</p>
-<h1 id="2-Tomcat-对-InitialContext-的实际实现原理"><a href="#2-Tomcat-对-InitialContext-的实际实现原理" class="headerlink" title="2. Tomcat 对 InitialContext 的实际实现原理"></a>2. Tomcat 对 InitialContext 的实际实现原理</h1><p>根据上文可知，在 Tomcat 中，<code>InitialContext</code> 的实际操作对象是 <code>org.apache.naming.java.javaURLContextFactory</code> 类。下面是这个类的 <code>getInitialContext</code> 方法的源代码：</p>
-<p><img src="/2020/06/09/tomcat-jndi/getInitialContext.png"></p>
-<p>这段代码会使用 <code>ContextBindings</code> 来检查线程 / 类加载器是否绑定了一个 Context，来返回不同的 Context 实现类。下面是 <code>ContextBindings.isClassLoaderBound</code> 方法：</p>
-<p><img src="/2020/06/09/tomcat-jndi/isClassLoaderBound.png"></p>
-<p>可以知道它实际上会检查这个类的 <code>clBindings</code> 集合是否含有这个线程的 <code>ContextClassLoader</code> 以及它的上级类加载器。根据对 <code>clBindings</code>  （每个应用一个 <code>ParallelWebAppClassLoader</code>） 和 <code>threadBindings</code> （没有元素）的探究，我们发现可以看出它实际上返回的是 <code>SelectorContext</code> 对象。</p>
-<p><img src="/2020/06/09/tomcat-jndi/4.png"></p>
-<p>对 <code>InitialContext</code> 的 <code>defaultInitCtx</code> （缓存的 Context）也证实了这一点。</p>
-<p><img src="/2020/06/09/tomcat-jndi/selectorCtx.png"></p>
-<p>对 <code>ContextBindings</code> 进行分析可知它是 Tomcat 中管理类选择器 / 线程与 Context 绑定关系的类。（篇幅有限，不放出它的源代码）。这个类主要使用 Map 来保存它们之间的关系。</p>
-<p>对 <code>SelectorContext.lookup</code> 方法进行分析可以知道它实际上是调用了 <code>getBoundContext</code> 方法，源代码如下：</p>
-<p><img src="/2020/06/09/tomcat-jndi/5.png"></p>
-<p>现在对于绑定的 Context 类型，就有了两种情况：</p>
-<h2 id="1-直接在-InitialContext-对应绑定的-Context"><a href="#1-直接在-InitialContext-对应绑定的-Context" class="headerlink" title="1. 直接在 InitialContext 对应绑定的 Context"></a>1. 直接在 InitialContext 对应绑定的 Context</h2><p>Tomcat 会做特殊标识，并在 <code>ContextBindings</code> 中注册。这个情况主要的作用是保存直接在 <code>InitialContext</code> 中绑定的关系。因为和主题关系不大，故不讲。</p>
-<h2 id="2-URL-Context-等非直接绑定到-InitialContext-的-Context"><a href="#2-URL-Context-等非直接绑定到-InitialContext-的-Context" class="headerlink" title="2. URL Context 等非直接绑定到 InitialContext 的 Context"></a>2. URL Context 等非直接绑定到 InitialContext 的 Context</h2><p>我们发现其实它是从 ContextBindings 中获取这个类加载器 / 线程对应的 Context。经查询，发现其对应的 Context 是 NamingContext。</p>
-<p><img src="/2020/06/09/tomcat-jndi/getClassLoader-Eval.png"></p>
-<p>根据 bindings 的提示，我们可以看到 “comp/env/…” 的树状结构了。这时候我们发现，每一个 bindings 的某一项的值就是一个 NamingEntry 的实例。NamingEntry 是一个数据类，代码就不放出来了。另外，如果是一个子 Context，那么这些都是 NamingContext 的实例。</p>
-<p>我们还是分析一下这个类的 lookup 方法。首先 <code>NamingContext.lookup</code> 方法的 (String) 重载方法会先把 name 包装成 CompositeName 对象，之后调用 (Name) 的重载方法，之后再调用 (Name, boolean) 的重载方法，这一重载方法的部分源代码如下：</p>
-<p><img src="/2020/06/09/tomcat-jndi/naming-lookup.png"></p>
-<p>这个重载方法首先通过 CompositeName 的 size 方法判断是否有多个子节点，如果有多个子节点就使用递归把子节点所对应的 Context 给获取到。之后根据数据类 NamingEntry 的 type 属性，来返回不同的值。根据 NamingEntry 的定义，type 为 0 时，这代表 ENTRY （节点）。而我们的数据源就属于此类，因此直接返回对应 NamingEntry 的 value 属性，结束。</p>
-<p> <img src="/2020/06/09/tomcat-jndi/typ0.png"></p>
-<hr>
-<p>参考代码：</p>
-<style>
-    small p {
-        color : grey;
-        line-height : 1em !important;
-    }
-</style>
-
-
-
-<small>
-
-<p>[1] openJDK</p>
-<p><a target="_blank" rel="noopener" href="https://github.com/openjdk/jdk14">https://github.com/openjdk/jdk14</a></p>
-<p>[2] tomcat (9.0.x)</p>
-<p><a target="_blank" rel="noopener" href="https://github.com/apache/tomcat/tree/9.0.x">https://github.com/apache/tomcat/tree/9.0.x</a></p>
-</small>
-
-<hr />
-
-<p>[ TART - TC - T1 - Y20 (1) ] @HQ</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="ckltjuusz0000x4oogs7t75wq" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
-      
-      
-      
-  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tomcat-%E5%8E%9F%E7%90%86%E6%8E%A2%E7%A9%B6/" rel="tag">Tomcat 原理探究</a></li></ul>
-
-    </footer>
-  </div>
   
 </article>
-
-
-
-  
 
 
 </section>
