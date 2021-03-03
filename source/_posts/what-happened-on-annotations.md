@@ -1168,6 +1168,8 @@ hash 方法主要是通过将高 16 位无符号右移 16 位跟低 16 位对齐
 ### equals 方法的实现 - equalsImpl(Object, Object)
 
 ```java
+// proxy = 代理对象自身
+// o = 要比较的对象
 private Boolean equalsImpl(Object proxy, Object o) {
     if (o == proxy)
         return true;
