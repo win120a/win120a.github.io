@@ -1197,6 +1197,8 @@ private Boolean equalsImpl(Object proxy, Object o) {
                 throw new AssertionError(e);
             }
         }
+        
+        // 根据数据类型进行相等比较
         if (!memberValueEquals(ourValue, hisValue))
             return false;
     }
