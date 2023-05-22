@@ -1207,6 +1207,9 @@ a.article-title:hover {
 .article-entry .gist .gist-file .gist-meta a:hover {
   text-decoration: underline;
 }
+pre .meta {
+  color: #0550ae;
+}
 pre .comment,
 pre .title {
   color: #6e7781;
@@ -1229,7 +1232,6 @@ pre .number,
 pre .preprocessor,
 pre .built_in,
 pre .literal,
-pre .params,
 pre .constant {
   color: #f99157;
 }
