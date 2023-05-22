@@ -10,7 +10,8 @@ highlight-yellow = #ffcc66
 highlight-green = #99cc99
 highlight-aqua = #66cccc
 highlight-blue = #6699cc
-highlight-purple = #cf222e
+highlight-keyword-red = #cf222e
+highlight-annotation = #0550ae
 
 $code-block
   background: highlight-background
@@ -109,9 +110,13 @@ $line-numbers
             text-decoration: underline
 
 pre
+  .meta
+    color: highlight-annotation
+
   .comment
   .title
     color: highlight-comment
+
   .variable
   .attribute
   .tag
@@ -125,17 +130,19 @@ pre
   .css .class
   .css .pseudo
     color: highlight-red
+
   .number
   .preprocessor
   .built_in
   .literal
-  .params
   .constant
     color: highlight-orange
+
   .class
   .ruby .class .title
   .css .rules .attribute
     color: highlight-green
+
   .string
   .value
   .inheritance
@@ -143,8 +150,10 @@ pre
   .ruby .symbol
   .xml .cdata
     color: highlight-green
+
   .css .hexcolor
     color: highlight-aqua
+
   .function
   .python .decorator
   .python .title
@@ -154,6 +163,7 @@ pre
   .javascript .title
   .coffeescript .title
     color: highlight-blue
+
   .keyword
   .javascript .function
-    color: highlight-purple
+    color: highlight-keyword-red
