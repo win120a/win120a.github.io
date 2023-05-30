@@ -74,6 +74,170 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-dubbo-eci-1" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
+  <div class="article-meta">
+    <a href="/2023/05/19/dubbo-eci-1/" class="article-date">
+  <time class="dt-published" datetime="2023-05-19T16:00:00.000Z" itemprop="datePublished">2023-05-20</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="p-name article-title" href="/2023/05/19/dubbo-eci-1/">Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="e-content article-entry" itemprop="articleBody">
+      
+        <h1 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h1><p>众所周知，Dubbo 在 3.1 版本中引入了错误码机制。在此摘抄一部分（我写的 &#x3D;_&#x3D; ）介绍文档如下 <sup>[1]</sup>：</p>
+<blockquote>
+<h3 id="背景-1"><a href="#背景-1" class="headerlink" title="背景"></a>背景</h3><p>Dubbo 内部依赖的 Logger 抽象层提供了日志输出能力，但是大部分的异常日志都没有附带排查说明，导致用户看到异常后无法进行处理。</p>
+<p>为了解决这个问题，自 Dubbo 3.1 版本开始，引入了错误码机制。其将官方文档中的错误码 FAQ 与日志框架连接起来。在日志抽象输出异常的同时附带输出对应的官网文档链接，引导用户进行自主排查。</p>
+<h3 id="错误码格式"><a href="#错误码格式" class="headerlink" title="错误码格式"></a>错误码格式</h3><p><code>[Cat]-[X]</code></p>
+<p>两个空格均为数字。其中第一个数字为类别，第二个数字为具体错误码。</p>
+<h3 id="Logger-接口支持"><a href="#Logger-接口支持" class="headerlink" title="Logger 接口支持"></a>Logger 接口支持</h3><p>为确保兼容性，Dubbo 3.1 基于原本的 Logger 抽象，构建了一个新的接口 <code>ErrorTypeAwareLogger</code>。</p>
+<p>warn 等级的方法进行了扩展如下</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title function_">warn</span><span class="params">(String code, String cause, String extendedInformation, String msg)</span>;</span><br><span class="line"><span class="keyword">void</span> <span class="title function_">warn</span><span class="params">(String code, String cause, String extendedInformation, String msg, Throwable e)</span>;</span><br></pre></td></tr></table></figure>
+
+<p>其中 code 指错误码，cause 指可能的原因（即 caused by… 后面所接的文字），extendedInformation 作为补充信息，直接附加在 caused by 这句话的后面。</p>
+<p>（对于 error 级别也做了相同的扩展。）</p>
+</blockquote>
+<p>为了确保各位贡献者能够了解到错误码机制下的 Logger 调用的要求，需要在 CI 进行一些检查，具体如下：</p>
+<ol>
+<li>为了确保错误码机制在 Dubbo 项目中的覆盖，需要一个检测机制来确定对应的 Logger 是否正确调用。（即确定所有 error 和 warn 级别的 Logger 调用都是 <code>ErrorTypeAwareLogger</code> 的。）</li>
+<li>为了确保错误码对应的文档都存在，同样需要一个检测机制来确定对应的错误码的文档是否存在。</li>
+</ol>
+<p>这便是这次介绍的 Dubbo 错误码 Logger 调用检查器（Dubbo Error Code Inspector，还是我写的 &#x3D;_&#x3D;）的作用。我将会用几篇文章介绍下它的工作流程。</p>
+<h1 id="错误码会出现在哪里"><a href="#错误码会出现在哪里" class="headerlink" title="错误码会出现在哪里"></a>错误码会出现在哪里</h1><h2 id="案例"><a href="#案例" class="headerlink" title="案例"></a>案例</h2><p>为了确定所有错误码对应的文档都是存在的，我们需要拿到所有的错误码。</p>
+<p>下面是错误码 Logger 调用的一些例子：</p>
+<p>イ、org.apache.dubbo.common.DeprecatedMethodInvocationCounter <sup>[2]</sup>：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * Invoked by (modified) deprecated method.</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * <span class="doctag">@param</span> methodDefinition filled by annotation processor. (like &#x27;org.apache.dubbo.common.URL.getServiceName()&#x27;)</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title function_">onDeprecatedMethodCalled</span><span class="params">(String methodDefinition)</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> (!hasThisMethodInvoked(methodDefinition)) &#123;</span><br><span class="line">        LOGGER.warn(</span><br><span class="line">            DeprecatedMethodInvocationCounterConstants.ERROR_CODE,</span><br><span class="line">            DeprecatedMethodInvocationCounterConstants.POSSIBLE_CAUSE,</span><br><span class="line">            DeprecatedMethodInvocationCounterConstants.EXTENDED_MESSAGE,</span><br><span class="line">            DeprecatedMethodInvocationCounterConstants.LOGGER_MESSAGE_PREFIX + methodDefinition</span><br><span class="line">        );</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    increaseInvocationCount(methodDefinition);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>对应常量类 <code>org.apache.dubbo.common.constants.DeprecatedMethodInvocationCounterConstants</code> <sup>[3]</sup>：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">package</span> org.apache.dubbo.common.constants;</span><br><span class="line"></span><br><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * Constants of Deprecated Method Invocation Counter.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">DeprecatedMethodInvocationCounterConstants</span> &#123;</span><br><span class="line">    <span class="keyword">private</span> <span class="title function_">DeprecatedMethodInvocationCounterConstants</span><span class="params">()</span> &#123;</span><br><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">UnsupportedOperationException</span>(<span class="string">&quot;No instance of DeprecatedMethodInvocationCounterConstants for you! &quot;</span>);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">String</span> <span class="variable">ERROR_CODE</span> <span class="operator">=</span> LoggerCodeConstants.COMMON_DEPRECATED_METHOD_INVOKED;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">String</span> <span class="variable">POSSIBLE_CAUSE</span> <span class="operator">=</span> <span class="string">&quot;invocation of deprecated method&quot;</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">String</span> <span class="variable">EXTENDED_MESSAGE</span> <span class="operator">=</span> <span class="string">&quot;&quot;</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">String</span> <span class="variable">LOGGER_MESSAGE_PREFIX</span> <span class="operator">=</span> <span class="string">&quot;Deprecated method invoked. The method is &quot;</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+
+<p>ロ、org.apache.dubbo.registry.support.CacheableFailbackRegistry <sup>[4]</sup>：</p>
+ <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title function_">evictURLCache</span><span class="params">(URL url)</span> &#123;</span><br><span class="line">    Map&lt;String, ServiceAddressURL&gt; oldURLs = stringUrls.remove(url);</span><br><span class="line">    <span class="keyword">try</span> &#123;</span><br><span class="line">        <span class="comment">// ...</span></span><br><span class="line">    &#125; <span class="keyword">catch</span> (Exception e) &#123;</span><br><span class="line">        <span class="comment">// It seems that the most possible statement that causes exception is the &#x27;schedule()&#x27; method.</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">// The executor that FrameworkExecutorRepository.nextScheduledExecutor() method returns</span></span><br><span class="line">        <span class="comment">// is made by Executors.newSingleThreadScheduledExecutor().</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">// After observing the code of ScheduledThreadPoolExecutor.delayedExecute,</span></span><br><span class="line">        <span class="comment">// it seems that it only throws RejectedExecutionException when the thread pool is shutdown.</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">// When? FrameworkExecutorRepository gets destroyed.</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">// 1-3: URL evicting failed.</span></span><br><span class="line">        logger.warn(REGISTRY_FAILED_URL_EVICTING, <span class="string">&quot;thread pool getting destroyed&quot;</span>, <span class="string">&quot;&quot;</span>,</span><br><span class="line">                    <span class="string">&quot;Failed to evict url for &quot;</span> + url.getServiceKey(), e);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>ハ、org.apache.dubbo.registry.support.CacheableFailbackRegistry <sup>[5]</sup> （错误码还不归属于常量管理的时候的 ロ 的代码段）：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title function_">evictURLCache</span><span class="params">(URL url)</span> &#123;</span><br><span class="line">    Map&lt;String, ServiceAddressURL&gt; oldURLs = stringUrls.remove(url);</span><br><span class="line">    <span class="keyword">try</span> &#123;</span><br><span class="line">        <span class="comment">// ...</span></span><br><span class="line">    &#125; <span class="keyword">catch</span> (Exception e) &#123;</span><br><span class="line">        <span class="comment">// ...</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">// 1-3: URL evicting failed.</span></span><br><span class="line">        logger.warn(<span class="string">&quot;1-3&quot;</span>, <span class="string">&quot;thread pool getting destroyed&quot;</span>, <span class="string">&quot;&quot;</span>,</span><br><span class="line">                    <span class="string">&quot;Failed to evict url for &quot;</span> + url.getServiceKey(), e);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>我们可以看到，错误码可能是直接量，也有可能在另一个常量文件里头（<code>org.apache.dubbo.common.constants.LoggerCodeConstants</code>）…… 理论上我们需要确定哪个是错误码的引用，然后到对应的常量文件去查询这个引用的错误码。</p>
+<h2 id="Java-编译器对常量所作的优化"><a href="#Java-编译器对常量所作的优化" class="headerlink" title="Java 编译器对常量所作的优化"></a>Java 编译器对常量所作的优化</h2><p>听上去似乎挺复杂？其实不然，Java 编译器在遇到访问基本数据类型和 String 类型的常量（即用 <code>static final</code> 修饰）的时候，它会把这个值直接传过去。</p>
+<p>例如将上述 イ 号例子（第一个 <code>onDeprecatedMethodCalled</code> 的例子）编译出来，再用 Java Decompiler 反编译后的效果：</p>
+<p><img src="/2023/05/19/dubbo-eci-1/java-decomplier.png" alt="Decompiled result of Dubbo Annotation Processor (R5.05.22-1)"></p>
+<p>可以看见，常量引用消失了，原来常量的引用的地方变成了常量的本身的值。</p>
+<p>于是乎，我们并不用翻来覆去地找对应的错误码的常量文件了，只用确定这个文件的常量中哪个是错误码就行了。</p>
+<h2 id="class-文件中常量在哪里？"><a href="#class-文件中常量在哪里？" class="headerlink" title="class 文件中常量在哪里？"></a>class 文件中常量在哪里？</h2><p>参考 <a href="/2021/01/27/what-happened-on-annotations/">我此前介绍注解处理的文章</a> 可知，我们可以用 javap 工具确定 class 文件的结构。对于上述的 イ 号例子（第一个 <code>onDeprecatedMethodCalled</code> 的例子），对其进行 javap 分析如下：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line">Classfile /D:/dubbo/dubbo-common/target/classes/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.<span class="keyword">class</span></span><br><span class="line">  <span class="title class_">Last</span> modified <span class="number">2023</span>年<span class="number">4</span>月<span class="number">20</span>日; size <span class="number">4231</span> bytes</span><br><span class="line">  SHA-<span class="number">256</span> checksum 7f1c61be7db4411abc1177cc8322318c04b0275a928968d1c731c2f13bdac66a</span><br><span class="line">  Compiled from <span class="string">&quot;DeprecatedMethodInvocationCounter.java&quot;</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">org</span>.apache.dubbo.common.DeprecatedMethodInvocationCounter</span><br><span class="line">  minor version: <span class="number">0</span></span><br><span class="line">  major version: <span class="number">52</span></span><br><span class="line">  flags: (<span class="number">0x0031</span>) ACC_PUBLIC, ACC_FINAL, ACC_SUPER</span><br><span class="line">  this_class: #<span class="number">41</span>                         <span class="comment">// org/apache/dubbo/common/DeprecatedMethodInvocationCounter</span></span><br><span class="line">  super_class: #<span class="number">43</span>                        <span class="comment">// java/lang/Object</span></span><br><span class="line">  interfaces: <span class="number">0</span>, fields: <span class="number">2</span>, methods: <span class="number">7</span>, attributes: <span class="number">3</span></span><br><span class="line">Constant pool:</span><br><span class="line">    #<span class="number">1</span> = Methodref          #<span class="number">43.</span>#<span class="number">88</span>       <span class="comment">// java/lang/Object.&quot;&lt;init&gt;&quot;:()V</span></span><br><span class="line">    #<span class="number">2</span> = Class              #<span class="number">89</span>           <span class="comment">// java/lang/UnsupportedOperationException</span></span><br><span class="line">    #<span class="number">3</span> = String             #<span class="number">90</span>           <span class="comment">// No instance of DeprecatedMethodInvocationCounter for you!</span></span><br><span class="line">    #<span class="number">4</span> = Methodref          #<span class="number">2.</span>#<span class="number">91</span>        <span class="comment">// java/lang/UnsupportedOperationException.&quot;&lt;init&gt;&quot;:(Ljava/lang/String;)V</span></span><br><span class="line">    #<span class="number">5</span> = Methodref          #<span class="number">41.</span>#<span class="number">92</span>       <span class="comment">// org/apache/dubbo/common/DeprecatedMethodInvocationCounter.hasThisMethodInvoked:(Ljava/lang/String;)Z</span></span><br><span class="line">    #<span class="number">6</span> = Fieldref           #<span class="number">41.</span>#<span class="number">93</span>       <span class="comment">// org/apache/dubbo/common/DeprecatedMethodInvocationCounter.LOGGER:Lorg/apache/dubbo/common/logger/ErrorTypeAwareLogger;</span></span><br><span class="line">    #<span class="number">7</span> = Class              #<span class="number">94</span>           <span class="comment">// org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants</span></span><br><span class="line">    #<span class="number">8</span> = String             #<span class="number">95</span>           <span class="comment">// 0-99</span></span><br><span class="line">    #<span class="number">9</span> = String             #<span class="number">96</span>           <span class="comment">// invocation of deprecated method</span></span><br><span class="line">   #<span class="number">10</span> = String             #<span class="number">97</span>           <span class="comment">//</span></span><br><span class="line">   #<span class="number">11</span> = Class              #<span class="number">98</span>           <span class="comment">// java/lang/StringBuilder</span></span><br><span class="line">   #<span class="number">12</span> = Methodref          #<span class="number">11.</span>#<span class="number">88</span>       <span class="comment">// java/lang/StringBuilder.&quot;&lt;init&gt;&quot;:()V</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// ...</span></span><br></pre></td></tr></table></figure>
+
+<p>可以看见 #8 号常量就是我们所需要的错误码。</p>
+<h1 id="怎么通过-Java-提取出错误码？"><a href="#怎么通过-Java-提取出错误码？" class="headerlink" title="怎么通过 Java 提取出错误码？"></a>怎么通过 Java 提取出错误码？</h1><p>Javassist 提供了操作 .class 文件的能力<sup>[6]</sup>。考虑到我们是直接读取 .class 文件中的常量池，所以使用 <code>ClassFile</code> 正合适。</p>
+<h2 id="打开-class-文件"><a href="#打开-class-文件" class="headerlink" title="打开 .class 文件"></a>打开 .class 文件</h2><p>我们可以知道通过 Javassist 的 ClassFile 类可以操作 .class 文件，下面是用它打开 .class 文件的代码的一个例子 <sup>[7]</sup>：</p>
+<blockquote>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">&gt;<span class="keyword">static</span> ClassFile <span class="title function_">openClassFile</span><span class="params">(String classFilePath)</span> &#123;</span><br><span class="line"> <span class="keyword">try</span> &#123;</span><br><span class="line">     <span class="type">byte</span>[] clsB = FileUtils.openFileAsByteArray(classFilePath);</span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> <span class="title class_">ClassFile</span>(<span class="keyword">new</span> <span class="title class_">DataInputStream</span>(<span class="keyword">new</span> <span class="title class_">ByteArrayInputStream</span>(clsB)));</span><br><span class="line">    &#125; <span class="keyword">catch</span> (IOException e) &#123;</span><br><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(e);</span><br><span class="line">    &#125;</span><br><span class="line">   &#125;</span><br></pre></td></tr></table></figure>
+</blockquote>
+<h2 id="获取常量池中的错误码"><a href="#获取常量池中的错误码" class="headerlink" title="获取常量池中的错误码"></a>获取常量池中的错误码</h2><p>据 .class 文件的结构，所有的 “常量” 都存在常量池中。所以考虑在 Javassist 中拿到 ConstPool，即调用 <code>ClassFile.getConstPool()</code> 方法 <sup>[8]</sup>，这样的话我们可以使用它来获取常量池的值。</p>
+<p>根据上面对 .class 文件的分析，可以知道其在常量池的 #8 号位置，并且它是 String 类型，所以调用 <code>ConstPool.getStringInfo(int)</code> （其中 int 参数为 index，即常量池的索引） 可以获取对应 String 的内容。 </p>
+<p>但是，因为我们获取的是多个的 class 文件的错误码，所以我们不能直接 “固定” 一个索引去拿错误码。考虑到 Javassist 的 API 是没法直接通过除了索引以外的数据来获取的。所以我们需要通过其它方式确认一个 .class 文件中所有的错误码。</p>
+<h2 id="Javassist-的内部实现"><a href="#Javassist-的内部实现" class="headerlink" title="Javassist 的内部实现"></a>Javassist 的内部实现</h2><p>我们可以仔细看下 Javassist 的有关获取 String 信息的代码：</p>
+<p><img src="/2023/05/19/dubbo-eci-1/javassist-code-r5-26-1.png" alt="Internals of Javassist #1, (R5.5.26-1)"></p>
+<p>可以知道它们全部都调用了一个通用方法 <code>getItem()</code> ，如下 ：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">ConstInfo <span class="title function_">getItem</span><span class="params">(<span class="type">int</span> n)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">return</span> items.elementAt(n);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>结合上述分析，我们可以知道 StringInfo 和 Utf8Info 都是 ConstInfo 的子类。对此我们可以先获取所有的常量池信息，然后筛选出合适的类型。</p>
+<p>不论是 ConstInfo 还是 getItem 方法，都是包私有的，我们无法直接访问它。因此需要用到反射。</p>
+<h2 id="确定单个-class-文件中所有的错误码"><a href="#确定单个-class-文件中所有的错误码" class="headerlink" title="确定单个 .class 文件中所有的错误码"></a>确定单个 .class 文件中所有的错误码</h2><h3 id="获取所有的常量池信息"><a href="#获取所有的常量池信息" class="headerlink" title="获取所有的常量池信息"></a>获取所有的常量池信息</h3><p>根据上面的实现，可以通过一个计数循环（通过 <code>ConstPool.getSize()</code> 获取所有常量池信息的个数）来获取所有的常量池信息，如下 <sup>[7]</sup>：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">static</span> List&lt;Object&gt; <span class="title function_">getConstPoolItems</span><span class="params">(ConstPool cp)</span> &#123;</span><br><span class="line">    List&lt;Object&gt; objects = <span class="keyword">new</span> <span class="title class_">ArrayList</span>&lt;&gt;(cp.getSize());</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 计数循环，获取所有的常量池信息。</span></span><br><span class="line">    <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> <span class="number">0</span>; i &lt; cp.getSize(); i++) &#123;</span><br><span class="line">        objects.add(getConstPoolItem(cp, i));</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> objects;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * 反射调用 ConstPool.getItem()。</span></span><br><span class="line"><span class="comment"> * Calls ConstPool.getItem() method reflectively.</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * <span class="doctag">@param</span> cp The ConstPool object.</span></span><br><span class="line"><span class="comment"> * <span class="doctag">@param</span> index The index of items.</span></span><br><span class="line"><span class="comment"> * <span class="doctag">@return</span> The XXXInfo Object. Since it&#x27;s invisible, return Object instead.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="keyword">static</span> Object <span class="title function_">getConstPoolItem</span><span class="params">(ConstPool cp, <span class="type">int</span> index)</span> &#123;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 考虑到反射的性能损耗，这里用了个 Method 的缓存。</span></span><br><span class="line">    <span class="keyword">if</span> (getItemMethodCache == <span class="literal">null</span>) &#123;</span><br><span class="line">        Class&lt;ConstPool&gt; cpc = ConstPool.class;</span><br><span class="line">        Method getItemMethod;</span><br><span class="line">        <span class="keyword">try</span> &#123;</span><br><span class="line">            getItemMethod = cpc.getDeclaredMethod(<span class="string">&quot;getItem&quot;</span>, <span class="type">int</span>.class);</span><br><span class="line">            getItemMethod.setAccessible(<span class="literal">true</span>);</span><br><span class="line"></span><br><span class="line">            getItemMethodCache = getItemMethod;</span><br><span class="line"></span><br><span class="line">        &#125; <span class="keyword">catch</span> (NoSuchMethodException e) &#123;</span><br><span class="line">            <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(<span class="string">&quot;Javassist internal method changed.&quot;</span>, e);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">try</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> getItemMethodCache.invoke(cp, index);</span><br><span class="line">    &#125; <span class="keyword">catch</span> (IllegalAccessException | InvocationTargetException e) &#123;</span><br><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(<span class="string">&quot;Javassist internal method changed.&quot;</span>, e);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+
+<h3 id="获取常量池中的错误码-1"><a href="#获取常量池中的错误码-1" class="headerlink" title="获取常量池中的错误码"></a>获取常量池中的错误码</h3><p>只有 Utf8Info 才是实际承载字符串信息的常量池项目，如下：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="title class_">Utf8Info</span> <span class="keyword">extends</span> <span class="title class_">ConstInfo</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">tag</span> <span class="operator">=</span> <span class="number">1</span>;</span><br><span class="line">    String string;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// ...</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>考虑到上述情况，我们只用在常量池中找出所有的 Utf8Info 对象，并获取它对应的字符串就行。具体的代码如下 <sup>[7]</sup>：</p>
+<blockquote>
+<p><strong>备注：</strong></p>
+<p>这里换了一种查找方式，并不是直接筛选出 Utf8Info，而是筛选出所有带 <code>String string;</code>  声明的 ConstInfo 子类的实例，之后获取 <code>string</code> 变量的内容。</p>
+</blockquote>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">static</span> List&lt;String&gt; <span class="title function_">getConstPoolStringItems</span><span class="params">(ConstPool cp)</span> &#123;</span><br><span class="line">    List&lt;Object&gt; objects = getConstPoolItems(cp);</span><br><span class="line">    List&lt;String&gt; stringItems = <span class="keyword">new</span> <span class="title class_">ArrayList</span>&lt;&gt;(cp.getSize());</span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> (Object item : objects) &#123;</span><br><span class="line"></span><br><span class="line">        Field stringField;</span><br><span class="line"></span><br><span class="line">        <span class="keyword">if</span> (item != <span class="literal">null</span>) &#123;</span><br><span class="line">            stringField = getStringFieldInConstPoolItems(item);</span><br><span class="line"></span><br><span class="line">            <span class="keyword">if</span> (stringField == <span class="literal">null</span>) &#123;</span><br><span class="line">                <span class="keyword">continue</span>;</span><br><span class="line">            &#125;</span><br><span class="line"></span><br><span class="line">            Object fieldData;</span><br><span class="line"></span><br><span class="line">            <span class="keyword">try</span> &#123;</span><br><span class="line">                fieldData = stringField.get(item);</span><br><span class="line">            &#125; <span class="keyword">catch</span> (IllegalAccessException e) &#123;</span><br><span class="line">                <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(<span class="string">&quot;Javassist internal field changed.&quot;</span>, e);</span><br><span class="line">            &#125;</span><br><span class="line"></span><br><span class="line">            <span class="keyword">if</span> (fieldData.getClass() == String.class) &#123;</span><br><span class="line">                stringItems.add((String) fieldData);</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> stringItems;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>在此之后，根据错误码格式（见最上述引用）使用正则表达式筛选出来便可，代码如下 <sup>[9]</sup>：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// In ErrorCodeExtractor.java: </span></span><br><span class="line"><span class="comment">// Pattern ERROR_CODE_PATTERN = Pattern.compile(&quot;\\d+-\\d+&quot;);</span></span><br><span class="line"></span><br><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">public</span> List&lt;String&gt; <span class="title function_">getErrorCodes</span><span class="params">(String classFilePath)</span> &#123;</span><br><span class="line"></span><br><span class="line">    <span class="type">ClassFile</span> <span class="variable">clsF</span> <span class="operator">=</span> JavassistUtils.openClassFile(classFilePath);</span><br><span class="line">    <span class="type">ConstPool</span> <span class="variable">cp</span> <span class="operator">=</span> clsF.getConstPool();</span><br><span class="line"></span><br><span class="line">    List&lt;String&gt; cpItems = JavassistUtils.getConstPoolStringItems(cp);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> cpItems.stream()</span><br><span class="line">    		.filter(x -&gt; ERROR_CODE_PATTERN.matcher(x).matches())</span><br><span class="line">    		.collect(Collectors.toList());</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>其返回值便是所有的错误码。</p>
+<p>当然，这只解决了获取全部错误码的问题。至于之后该怎么获得所有的 Logger 调用等等，还请看下回分解。</p>
+<hr>
+<p>备注：</p>
+<ol>
+<li><p>有关环境：</p>
+<p>イ、命令行 Maven 运行于 OpenJDK 19 环境下。</p>
+<p>ロ、对于 Dubbo 项目 IDEA JDK 配置为基于 OpenJDK 8 的 GraalVM 21.3.1 的 JDK。</p>
+<p>ハ、在编写错误码 Logger 调用自动检测程序时，使用的是 OpenJDK 19 版本，但调节了兼容性设置到 JDK 8。</p>
+<p>ニ、在 Dubbo CI 运行时使用 Azul OpenJDK 17。</p>
+</li>
+</ol>
+<hr>
+<p>引用和参考：</p>
+<style>
+    small p {
+        color : grey;
+        line-height : 1em !important;
+    }
+</style>
+<small>
+
+<p>[1] Apache Dubbo - 错误码机制介绍</p>
+<p><a target="_blank" rel="noopener" href="https://dubbo.apache.org/faq/intro">https://dubbo.apache.org/faq/intro</a></p>
+<p>[2] Apache Dubbo Source Code - org.apache.dubbo.common.DeprecatedMethodInvocationCounter</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java">https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java</a></p>
+<p>[3] Apache Dubbo Source Code - org.apache.dubbo.common.constants.DeprecatedMethodInvocationCounterConstants</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants.java">https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants.java</a></p>
+<p>[4] Apache Dubbo Source Code - org.apache.dubbo.registry.support.CacheableFailbackRegistry</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/3.3/dubbo-registry/dubbo-registry-api/src/main/java/org/apache/dubbo/registry/support/CacheableFailbackRegistry.java">https://github.com/apache/dubbo/blob/3.3/dubbo-registry/dubbo-registry-api/src/main/java/org/apache/dubbo/registry/support/CacheableFailbackRegistry.java</a></p>
+<p>[5] Apache Dubbo Source Code - org.apache.dubbo.registry.support.CacheableFailbackRegistry (error code was not managed in this version)</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/7359a98fdd0ff274f50b0f6561d249d133d0f2fb/dubbo-registry/dubbo-registry-api/src/main/java/org/apache/dubbo/registry/support/CacheableFailbackRegistry.java">https://github.com/apache/dubbo/blob/7359a98fdd0ff274f50b0f6561d249d133d0f2fb/dubbo-registry/dubbo-registry-api/src/main/java/org/apache/dubbo/registry/support/CacheableFailbackRegistry.java</a></p>
+<p>[6] Javassist Tutorial</p>
+<p><a target="_blank" rel="noopener" href="http://www.javassist.org/tutorial/tutorial3.html#intro">http://www.javassist.org/tutorial/tutorial3.html#intro</a></p>
+<p>[7] Apache Dubbo Error Code Inspector Source Code (in dubbo-test-tools) - org.apache.dubbo.errorcode.extractor.JavassistUtils</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/extractor/JavassistUtils.java">https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/extractor/JavassistUtils.java</a></p>
+<p>[8] Javassist API Docs - javassist.bytecode.ClassFile#getConstPool()</p>
+<p><a target="_blank" rel="noopener" href="https://www.javassist.org/html/javassist/bytecode/ClassFile.html#getConstPool()">https://www.javassist.org/html/javassist/bytecode/ClassFile.html#getConstPool()</a></p>
+<p>[9]  Apache Dubbo Error Code Inspector Source Code (in dubbo-test-tools) - org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/extractor/JavassistConstantPoolErrorCodeExtractor.java">https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/extractor/JavassistConstantPoolErrorCodeExtractor.java</a></p>
+</small>
+
+<hr />
+
+<p>[ TART - Dubbo (ECI) - T3 - R5 ] @HQ</p>
+<p>(SNa - ECI, SNu - 1)</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="cliaeq1ix0000byovbxe73bmo" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
+      
+      
+      
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Apache-Dubbo/" rel="tag">Apache Dubbo</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Dubbo-ECI/" rel="tag">Dubbo ECI</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Javassist/" rel="tag">Javassist</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+
+  
     <article id="post-what-happened-on-annotations" class="h-entry article article-type-post" itemprop="blogPost" itemscope itemtype="https://schema.org/BlogPosting">
   <div class="article-meta">
     <a href="/2021/01/27/what-happened-on-annotations/" class="article-date">
@@ -373,7 +537,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2021/01/27/what-happened-on-annotations/" data-id="clhz4mqkm0003eloxbfqw423p" data-title="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2021/01/27/what-happened-on-annotations/" data-id="cliaeq1j60003byov0get189c" data-title="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么" class="article-share-link">分享</a>
       
       
       
@@ -487,7 +651,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="clhz4mqke0000elox0v91bbud" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="cliaeq1j30001byov9zbq42eh" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
       
       
       
@@ -514,7 +678,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">标签</h3>
     <div class="widget">
-      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/tags/OpenJDK-%E5%BA%95%E5%B1%82%E6%8E%A2%E7%A9%B6/" rel="tag">OpenJDK 底层探究</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tomcat-%E5%8E%9F%E7%90%86%E6%8E%A2%E7%A9%B6/" rel="tag">Tomcat 原理探究</a></li></ul>
+      <ul class="tag-list" itemprop="keywords"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Apache-Dubbo/" rel="tag">Apache Dubbo</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Dubbo-ECI/" rel="tag">Dubbo ECI</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Javassist/" rel="tag">Javassist</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/OpenJDK-%E5%BA%95%E5%B1%82%E6%8E%A2%E7%A9%B6/" rel="tag">OpenJDK 底层探究</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tomcat-%E5%8E%9F%E7%90%86%E6%8E%A2%E7%A9%B6/" rel="tag">Tomcat 原理探究</a></li></ul>
     </div>
   </div>
 
@@ -524,7 +688,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">标签云</h3>
     <div class="widget tagcloud">
-      <a href="/tags/OpenJDK-%E5%BA%95%E5%B1%82%E6%8E%A2%E7%A9%B6/" style="font-size: 10px;">OpenJDK 底层探究</a> <a href="/tags/Tomcat-%E5%8E%9F%E7%90%86%E6%8E%A2%E7%A9%B6/" style="font-size: 10px;">Tomcat 原理探究</a>
+      <a href="/tags/Apache-Dubbo/" style="font-size: 10px;">Apache Dubbo</a> <a href="/tags/Dubbo-ECI/" style="font-size: 10px;">Dubbo ECI</a> <a href="/tags/Javassist/" style="font-size: 10px;">Javassist</a> <a href="/tags/OpenJDK-%E5%BA%95%E5%B1%82%E6%8E%A2%E7%A9%B6/" style="font-size: 10px;">OpenJDK 底层探究</a> <a href="/tags/Tomcat-%E5%8E%9F%E7%90%86%E6%8E%A2%E7%A9%B6/" style="font-size: 10px;">Tomcat 原理探究</a>
     </div>
   </div>
 
@@ -533,7 +697,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">归档</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2021/01/">一月 2021</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/06/">六月 2020</a></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2023/05/">五月 2023</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2021/01/">一月 2021</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/06/">六月 2020</a></li></ul>
     </div>
   </div>
 
@@ -544,6 +708,10 @@
     <h3 class="widget-title">最新文章</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2023/05/19/dubbo-eci-1/">Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取</a>
+          </li>
         
           <li>
             <a href="/2021/01/27/what-happened-on-annotations/">源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么</a>
