@@ -3,13 +3,19 @@
     <%- partial('_partial/sidebar') %>
   <% } %>
   <div class="outer">
-    <div id="footer-info" class="inner">
-      <% if (theme.copyright){ %>
-        <%- render(theme.copyright, 'pug'); %>
-      <% } %>
-      &copy; <%= date(new Date(), 'YYYY') %> <%= config.author || config.title %><br>
-      <%= __('powered_by') %> <a href="https://hexo.io/" target="_blank">Hexo</a><br />
-      Published with <a href="https://pages.github.com">GitHub Pages</a>
+    <div id="footer-info" class="inner" style="display: flex;justify-content: space-between; align-items: center;">
+      <div>
+          <% if (theme.copyright){ %>
+            <%- render(theme.copyright, 'pug'); %>
+          <% } %>
+          &copy; <%= date(new Date(), 'YYYY') %> <%= config.author || config.title %><br>
+          <%= __('powered_by') %> <a href="https://hexo.io/" target="_blank">Hexo</a><br />
+          Published with <a href="https://pages.github.com">GitHub Pages</a>
+      </div>
+      <div style="text-align: center">
+          <img src="/images/wechat_mp.jpg" style="width: 5rem; height: 5rem; ">
+          <div>微信公众号：内核实验室</div>
+      </div>
     </div>
   </div>
 </footer>
