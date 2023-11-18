@@ -16,7 +16,7 @@
 <meta property="og:image" content="http://win120a.github.io/2023/05/19/dubbo-eci-1/java-decomplier.png">
 <meta property="og:image" content="http://win120a.github.io/2023/05/19/dubbo-eci-1/javassist-code-r5-26-1.png">
 <meta property="article:published_time" content="2023-05-19T16:00:00.000Z">
-<meta property="article:modified_time" content="2023-11-18T16:17:15.679Z">
+<meta property="article:modified_time" content="2023-11-18T16:21:19.212Z">
 <meta property="article:author" content="Andy Cheung">
 <meta property="article:tag" content="Apache Dubbo">
 <meta property="article:tag" content="Dubbo ECI">
@@ -151,9 +151,10 @@
 <p>可以看见 #8 号常量就是我们所需要的错误码。</p>
 <h1 id="怎么通过-Java-提取出错误码？"><a href="#怎么通过-Java-提取出错误码？" class="headerlink" title="怎么通过 Java 提取出错误码？"></a>怎么通过 Java 提取出错误码？</h1><p>Javassist 提供了操作 .class 文件的能力<sup>[6]</sup>。考虑到我们是直接读取 .class 文件中的常量池，所以使用 <code>ClassFile</code> 正合适。</p>
 <h2 id="打开-class-文件"><a href="#打开-class-文件" class="headerlink" title="打开 .class 文件"></a>打开 .class 文件</h2><p>我们可以知道通过 Javassist 的 ClassFile 类可以操作 .class 文件，下面是用它打开 .class 文件的代码的一个例子 <sup>[7]</sup>：</p>
-<blockquote>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">&gt;<span class="keyword">static</span> ClassFile <span class="title function_">openClassFile</span><span class="params">(String classFilePath)</span> &#123;</span><br><span class="line">     <span class="keyword">try</span> &#123;</span><br><span class="line">           <span class="type">byte</span>[] clsB = FileUtils.openFileAsByteArray(classFilePath);</span><br><span class="line">           <span class="keyword">return</span> <span class="keyword">new</span> <span class="title class_">ClassFile</span>(<span class="keyword">new</span> <span class="title class_">DataInputStream</span>(<span class="keyword">new</span> <span class="title class_">ByteArrayInputStream</span>(clsB)));</span><br><span class="line">       &#125; <span class="keyword">catch</span> (IOException e) &#123;</span><br><span class="line">           <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(e);</span><br><span class="line">       &#125;</span><br><span class="line">   &#125;</span><br></pre></td></tr></table></figure>
-</blockquote>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">static</span> ClassFile <span class="title function_">openClassFile</span><span class="params">(String classFilePath)</span> &#123;</span><br><span class="line">    <span class="keyword">try</span> &#123;</span><br><span class="line">        <span class="type">byte</span>[] clsB = FileUtils.openFileAsByteArray(classFilePath);</span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> <span class="title class_">ClassFile</span>(<span class="keyword">new</span> <span class="title class_">DataInputStream</span>(<span class="keyword">new</span> <span class="title class_">ByteArrayInputStream</span>(clsB)));</span><br><span class="line">    &#125; <span class="keyword">catch</span> (IOException e) &#123;</span><br><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(e);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+
 <h2 id="获取常量池中的错误码"><a href="#获取常量池中的错误码" class="headerlink" title="获取常量池中的错误码"></a>获取常量池中的错误码</h2><p>据 .class 文件的结构，所有的 “常量” 都存在常量池中。所以考虑在 Javassist 中拿到 ConstPool，即调用 <code>ClassFile.getConstPool()</code> 方法 <sup>[8]</sup>，这样的话我们可以使用它来获取常量池的值。</p>
 <p>根据上面对 .class 文件的分析，可以知道其在常量池的 #8 号位置，并且它是 String 类型，所以调用 <code>ConstPool.getStringInfo(int)</code> （其中 int 参数为 index，即常量池的索引） 可以获取对应 String 的内容。 </p>
 <p>但是，因为我们获取的是多个的 class 文件的错误码，所以我们不能直接 “固定” 一个索引去拿错误码。考虑到 Javassist 的 API 是没法直接通过除了索引以外的数据来获取的。所以我们需要通过其它方式确认一个 .class 文件中所有的错误码。</p>
@@ -233,7 +234,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="clp495foq0000k9qc2bardiq3" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="clp49asso0000gvqe00223qbm" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
       
       
       
