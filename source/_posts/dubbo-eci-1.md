@@ -209,14 +209,14 @@ Javassist 提供了操作 .class 文件的能力<sup>[6]</sup>。考虑到我们
 
 > ```java
 >static ClassFile openClassFile(String classFilePath) {
->  try {
->      byte[] clsB = FileUtils.openFileAsByteArray(classFilePath);
->         return new ClassFile(new DataInputStream(new ByteArrayInputStream(clsB)));
->     } catch (IOException e) {
->         throw new RuntimeException(e);
->     }
+>      try {
+>            byte[] clsB = FileUtils.openFileAsByteArray(classFilePath);
+>            return new ClassFile(new DataInputStream(new ByteArrayInputStream(clsB)));
+>        } catch (IOException e) {
+>            throw new RuntimeException(e);
+>        }
 >    }
->    ```
+>```
 
 
 
