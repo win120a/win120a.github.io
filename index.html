@@ -144,7 +144,7 @@
 <h1 id="怎么通过-Java-提取出错误码？"><a href="#怎么通过-Java-提取出错误码？" class="headerlink" title="怎么通过 Java 提取出错误码？"></a>怎么通过 Java 提取出错误码？</h1><p>Javassist 提供了操作 .class 文件的能力<sup>[6]</sup>。考虑到我们是直接读取 .class 文件中的常量池，所以使用 <code>ClassFile</code> 正合适。</p>
 <h2 id="打开-class-文件"><a href="#打开-class-文件" class="headerlink" title="打开 .class 文件"></a>打开 .class 文件</h2><p>我们可以知道通过 Javassist 的 ClassFile 类可以操作 .class 文件，下面是用它打开 .class 文件的代码的一个例子 <sup>[7]</sup>：</p>
 <blockquote>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">&gt;<span class="keyword">static</span> ClassFile <span class="title function_">openClassFile</span><span class="params">(String classFilePath)</span> &#123;</span><br><span class="line"> <span class="keyword">try</span> &#123;</span><br><span class="line">     <span class="type">byte</span>[] clsB = FileUtils.openFileAsByteArray(classFilePath);</span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> <span class="title class_">ClassFile</span>(<span class="keyword">new</span> <span class="title class_">DataInputStream</span>(<span class="keyword">new</span> <span class="title class_">ByteArrayInputStream</span>(clsB)));</span><br><span class="line">    &#125; <span class="keyword">catch</span> (IOException e) &#123;</span><br><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(e);</span><br><span class="line">    &#125;</span><br><span class="line">   &#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">&gt;<span class="keyword">static</span> ClassFile <span class="title function_">openClassFile</span><span class="params">(String classFilePath)</span> &#123;</span><br><span class="line">     <span class="keyword">try</span> &#123;</span><br><span class="line">           <span class="type">byte</span>[] clsB = FileUtils.openFileAsByteArray(classFilePath);</span><br><span class="line">           <span class="keyword">return</span> <span class="keyword">new</span> <span class="title class_">ClassFile</span>(<span class="keyword">new</span> <span class="title class_">DataInputStream</span>(<span class="keyword">new</span> <span class="title class_">ByteArrayInputStream</span>(clsB)));</span><br><span class="line">       &#125; <span class="keyword">catch</span> (IOException e) &#123;</span><br><span class="line">           <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(e);</span><br><span class="line">       &#125;</span><br><span class="line">   &#125;</span><br></pre></td></tr></table></figure>
 </blockquote>
 <h2 id="获取常量池中的错误码"><a href="#获取常量池中的错误码" class="headerlink" title="获取常量池中的错误码"></a>获取常量池中的错误码</h2><p>据 .class 文件的结构，所有的 “常量” 都存在常量池中。所以考虑在 Javassist 中拿到 ConstPool，即调用 <code>ClassFile.getConstPool()</code> 方法 <sup>[8]</sup>，这样的话我们可以使用它来获取常量池的值。</p>
 <p>根据上面对 .class 文件的分析，可以知道其在常量池的 #8 号位置，并且它是 String 类型，所以调用 <code>ConstPool.getStringInfo(int)</code> （其中 int 参数为 index，即常量池的索引） 可以获取对应 String 的内容。 </p>
@@ -225,7 +225,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="clp48sxnv0000gzoobhtcg3gz" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="clp495foq0000k9qc2bardiq3" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
       
       
       
@@ -538,7 +538,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2021/01/27/what-happened-on-annotations/" data-id="clp48sxo50008gzoognxd4pcf" data-title="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2021/01/27/what-happened-on-annotations/" data-id="clp495foz000ak9qcft6qd81y" data-title="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么" class="article-share-link">分享</a>
       
       
       
@@ -652,7 +652,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="clp48sxo40007gzooe2f2ab2x" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="clp495fou0001k9qc7oa551oq" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
       
       
       
