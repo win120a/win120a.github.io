@@ -207,16 +207,16 @@ Javassist 提供了操作 .class 文件的能力<sup>[6]</sup>。考虑到我们
 
 我们可以知道通过 Javassist 的 ClassFile 类可以操作 .class 文件，下面是用它打开 .class 文件的代码的一个例子 <sup>[7]</sup>：
 
-> ```java
->static ClassFile openClassFile(String classFilePath) {
->      try {
->            byte[] clsB = FileUtils.openFileAsByteArray(classFilePath);
->            return new ClassFile(new DataInputStream(new ByteArrayInputStream(clsB)));
->        } catch (IOException e) {
->            throw new RuntimeException(e);
->        }
->    }
->```
+```java
+static ClassFile openClassFile(String classFilePath) {
+    try {
+        byte[] clsB = FileUtils.openFileAsByteArray(classFilePath);
+        return new ClassFile(new DataInputStream(new ByteArrayInputStream(clsB)));
+    } catch (IOException e) {
+        throw new RuntimeException(e);
+    }
+}
+```
 
 
 
