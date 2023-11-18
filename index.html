@@ -168,6 +168,7 @@
 <blockquote>
 <p><strong>备注：</strong></p>
 <p>这里换了一种查找方式，并不是直接筛选出 Utf8Info，而是筛选出所有带 <code>String string;</code>  声明的 ConstInfo 子类的实例，之后获取 <code>string</code> 变量的内容。</p>
+<p><small>(R5.10.30 补 - 其实当时是认为 StringInfo 类也存放了实际的字符串内容而这么做的…… 但实际上它只存放了个对应字符串的常量池索引……)</small></p>
 </blockquote>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">static</span> List&lt;String&gt; <span class="title function_">getConstPoolStringItems</span><span class="params">(ConstPool cp)</span> &#123;</span><br><span class="line">    List&lt;Object&gt; objects = getConstPoolItems(cp);</span><br><span class="line">    List&lt;String&gt; stringItems = <span class="keyword">new</span> <span class="title class_">ArrayList</span>&lt;&gt;(cp.getSize());</span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> (Object item : objects) &#123;</span><br><span class="line"></span><br><span class="line">        Field stringField;</span><br><span class="line"></span><br><span class="line">        <span class="keyword">if</span> (item != <span class="literal">null</span>) &#123;</span><br><span class="line">            stringField = getStringFieldInConstPoolItems(item);</span><br><span class="line"></span><br><span class="line">            <span class="keyword">if</span> (stringField == <span class="literal">null</span>) &#123;</span><br><span class="line">                <span class="keyword">continue</span>;</span><br><span class="line">            &#125;</span><br><span class="line"></span><br><span class="line">            Object fieldData;</span><br><span class="line"></span><br><span class="line">            <span class="keyword">try</span> &#123;</span><br><span class="line">                fieldData = stringField.get(item);</span><br><span class="line">            &#125; <span class="keyword">catch</span> (IllegalAccessException e) &#123;</span><br><span class="line">                <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(<span class="string">&quot;Javassist internal field changed.&quot;</span>, e);</span><br><span class="line">            &#125;</span><br><span class="line"></span><br><span class="line">            <span class="keyword">if</span> (fieldData.getClass() == String.class) &#123;</span><br><span class="line">                stringItems.add((String) fieldData);</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> stringItems;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
@@ -199,9 +200,9 @@
 <p>[1] Apache Dubbo - 错误码机制介绍</p>
 <p><a target="_blank" rel="noopener" href="https://dubbo.apache.org/faq/intro">https://dubbo.apache.org/faq/intro</a></p>
 <p>[2] Apache Dubbo Source Code - org.apache.dubbo.common.DeprecatedMethodInvocationCounter</p>
-<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java">https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java</a></p>
+<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/5ae875d951d354a2f2d3316fc08cab406a3e947e/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java">https://github.com/apache/dubbo/blob/5ae875d951d354a2f2d3316fc08cab406a3e947e/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java</a></p>
 <p>[3] Apache Dubbo Source Code - org.apache.dubbo.common.constants.DeprecatedMethodInvocationCounterConstants</p>
-<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants.java">https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants.java</a></p>
+<p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/5ae875d951d354a2f2d3316fc08cab406a3e947e/dubbo-common/src/main/java/org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants.java">https://github.com/apache/dubbo/blob/5ae875d951d354a2f2d3316fc08cab406a3e947e/dubbo-common/src/main/java/org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants.java</a></p>
 <p>[4] Apache Dubbo Source Code - org.apache.dubbo.registry.support.CacheableFailbackRegistry</p>
 <p><a target="_blank" rel="noopener" href="https://github.com/apache/dubbo/blob/3.3/dubbo-registry/dubbo-registry-api/src/main/java/org/apache/dubbo/registry/support/CacheableFailbackRegistry.java">https://github.com/apache/dubbo/blob/3.3/dubbo-registry/dubbo-registry-api/src/main/java/org/apache/dubbo/registry/support/CacheableFailbackRegistry.java</a></p>
 <p>[5] Apache Dubbo Source Code - org.apache.dubbo.registry.support.CacheableFailbackRegistry (error code was not managed in this version)</p>
@@ -224,7 +225,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="cllxgh9yk0000dmorc3n9fto9" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="clp48sxnv0000gzoobhtcg3gz" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
       
       
       
@@ -537,7 +538,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2021/01/27/what-happened-on-annotations/" data-id="cllxgh9yt0003dmoraq3meu3s" data-title="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2021/01/27/what-happened-on-annotations/" data-id="clp48sxo50008gzoognxd4pcf" data-title="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么" class="article-share-link">分享</a>
       
       
       
@@ -651,7 +652,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="cllxgh9yq0001dmorbd9heqaa" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="clp48sxo40007gzooe2f2ab2x" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
       
       
       
