@@ -327,6 +327,8 @@ class Utf8Info extends ConstInfo
 > **备注：**
 >
 > 这里换了一种查找方式，并不是直接筛选出 Utf8Info，而是筛选出所有带 `String string;`  声明的 ConstInfo 子类的实例，之后获取 `string` 变量的内容。
+>
+> <small>(R5.10.30 补 - 其实当时是认为 StringInfo 类也存放了实际的字符串内容而这么做的…… 但实际上它只存放了个对应字符串的常量池索引……)</small>
 
 
 
@@ -427,11 +429,11 @@ https://dubbo.apache.org/faq/intro
 
 [2] Apache Dubbo Source Code - org.apache.dubbo.common.DeprecatedMethodInvocationCounter
 
-https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java
+https://github.com/apache/dubbo/blob/5ae875d951d354a2f2d3316fc08cab406a3e947e/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java
 
 [3] Apache Dubbo Source Code - org.apache.dubbo.common.constants.DeprecatedMethodInvocationCounterConstants
 
-https://github.com/apache/dubbo/blob/3.3/dubbo-common/src/main/java/org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants.java
+https://github.com/apache/dubbo/blob/5ae875d951d354a2f2d3316fc08cab406a3e947e/dubbo-common/src/main/java/org/apache/dubbo/common/constants/DeprecatedMethodInvocationCounterConstants.java
 
 [4] Apache Dubbo Source Code - org.apache.dubbo.registry.support.CacheableFailbackRegistry
 
