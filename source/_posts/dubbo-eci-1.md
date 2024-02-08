@@ -43,7 +43,7 @@ tags:
 
 为了确保各位贡献者能够了解到错误码机制下的 Logger 调用的要求，需要在 CI 进行一些检查，具体如下：
 
-1. 为了确保错误码机制在 Dubbo 项目中的覆盖，需要一个检测机制来确定对应的 Logger 是否正确调用。（即确定所有 error 和 warn 级别的 Logger 调用都是 `ErrorTypeAwareLogger` 的。）
+1. 为了确保错误码机制在 Dubbo 项目中的覆盖，需要一个检测机制来确定对应的 Logger 是否正确调用。（即确定所有 error 和 warn 级别的 Logger 调用都是 `ErrorTypeAwareLogger` 的。但是 `ErrorTypeAwareLogger` 是派生于 `Logger` 类的，并且我们需要通过 Logger 接口的方法作为错误码 Logger 内部调用的基础。因此我们需要检查 warn 和 error 级别的日志方法中具体调用了哪个方法，是不是调用了本级方法而不是上级派生的日志方法？）
 2. 为了确保错误码对应的文档都存在，同样需要一个检测机制来确定对应的错误码的文档是否存在。
 
 这便是这次介绍的 Dubbo 错误码 Logger 调用检查器（Dubbo Error Code Inspector，还是我写的 =_=）的作用。我将会用几篇文章介绍下它的工作流程。
