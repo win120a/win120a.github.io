@@ -111,7 +111,7 @@
 </blockquote>
 <p>为了确保各位贡献者能够了解到错误码机制下的 Logger 调用的要求，需要在 CI 进行一些检查，具体如下：</p>
 <ol>
-<li>为了确保错误码机制在 Dubbo 项目中的覆盖，需要一个检测机制来确定对应的 Logger 是否正确调用。（即确定所有 error 和 warn 级别的 Logger 调用都是 <code>ErrorTypeAwareLogger</code> 的。）</li>
+<li>为了确保错误码机制在 Dubbo 项目中的覆盖，需要一个检测机制来确定对应的 Logger 是否正确调用。（即确定所有 error 和 warn 级别的 Logger 调用都是 <code>ErrorTypeAwareLogger</code> 的。但是 <code>ErrorTypeAwareLogger</code> 是派生于 <code>Logger</code> 类的，并且我们需要通过 Logger 接口的方法作为错误码 Logger 内部调用的基础。因此我们需要检查 warn 和 error 级别的日志方法中具体调用了哪个方法，是不是调用了本级方法而不是上级派生的日志方法？）</li>
 <li>为了确保错误码对应的文档都存在，同样需要一个检测机制来确定对应的错误码的文档是否存在。</li>
 </ol>
 <p>这便是这次介绍的 Dubbo 错误码 Logger 调用检查器（Dubbo Error Code Inspector，还是我写的 &#x3D;_&#x3D;）的作用。我将会用几篇文章介绍下它的工作流程。</p>
@@ -226,7 +226,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="clpmdyyxe0000h0q70bt23xu2" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2023/05/19/dubbo-eci-1/" data-id="clsd55lwl0000drow5aja52su" data-title="Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（一） - 背景和错误码的获取" class="article-share-link">分享</a>
       
       
       
@@ -539,7 +539,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2021/01/27/what-happened-on-annotations/" data-id="clpmdyyxn0008h0q72c265phs" data-title="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2021/01/27/what-happened-on-annotations/" data-id="clsd55lws0003drow6hbw2fli" data-title="源码探索 | 从 Java 层面分析注解 (Annotation) 从编译到运行时发生了什么" class="article-share-link">分享</a>
       
       
       
@@ -653,7 +653,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="clpmdyyxm0007h0q72y0e7f6h" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
+      <a data-url="http://win120a.github.io/2020/06/09/tomcat-jndi/" data-id="clsd55lwq0001drow4ao8hrld" data-title="Tomcat 下通过 JNDI 获取绑定的数据源对象的背后原理" class="article-share-link">分享</a>
       
       
       
@@ -737,7 +737,7 @@
     <div id="footer-info" class="inner" style="display: flex;justify-content: space-between; align-items: center;">
       <div>
           
-          &copy; 2023 Andy Cheung<br>
+          &copy; 2024 Andy Cheung<br>
           Powered by <a href="https://hexo.io/" target="_blank">Hexo</a><br />
           Published with <a target="_blank" rel="noopener" href="https://pages.github.com">GitHub Pages</a>
       </div>
