@@ -123,6 +123,134 @@ CONSTANT_InterfaceMethodref_info {
 
 
 
+因此我们只需要确认 .class 文件里头的所有的 CONSTANT_InterfaceMethodref_info 的内容即可。
+
+我们可以仿照上篇文章的 Javassist 的用法（以下均为org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor#getIllegalLoggerMethodInvocations 这一方法的讲述）：
+
+1. 首先找到 CONSTANT_InterfaceMethodref_info 在 Javassist 中对应的类 javassist.bytecode.InterfaceMethodrefInfo
+
+2. 通过反射获得所有的常量池的内容，并通过 Stream 筛选和 map 出所有的 InterfaceMethodrefInfo 的实例所对应的常量池索引：
+   ```java
+   List<Integer> interfaceMethodRefIndices = constPoolItems.stream().filter(x -> {
+       try {
+           if (x == null) return false;
+           return x.getClass() == Class.forName("javassist.bytecode.InterfaceMethodrefInfo");
+       } catch (ClassNotFoundException e) {
+           return false;
+       }
+   }).map(this::getIndexFieldInConstPoolItems).collect(Collectors.toList());
+   ```
+另附 `getIndexFieldInConstPoolItems` 和 `ReflectUtils.getDeclaredFieldRecursively` 的代码：
+   ```java
+   // 为了查找出 Javassist 对应的常量池类实例的 index 的 Field，以确定其在常量池的索引。
+   private int getIndexFieldInConstPoolItems(Object item) {
+       // 鉴于 index 这个 Field 是在 javassist.bytecode.ConstInfo 中定义的。
+       // 此处其实可以使用 javassist.bytecode.ConstInfo 所对应的 Class 对象直接获取。
+       // 但是原本的写法是从该类一直向父类找 index 这个 Field。
+       Field indexField = ReflectUtils.getDeclaredFieldRecursively(item.getClass(), "index");
+   
+       try {
+           return (int) indexField.get(item);
+       } catch (IllegalAccessException e) {
+           throw new RuntimeException(e);
+       }
+   }
+   ```
+   
+   ```java
+   public static Field getDeclaredFieldRecursively(Class cls, String name) {
+       try {
+           // 本类找得到么？
+           Field indexField = cls.getDeclaredField(name);
+           indexField.setAccessible(true);
+   
+           return indexField;
+        } catch (NoSuchFieldException e) {
+           // 到头了
+           if (cls == Object.class) {
+               // null 了事。
+               return null;
+           }
+
+           // 向上找。
+           return getDeclaredFieldRecursively(cls.getSuperclass(), name);
+       }
+   }
+   ```
+
+
+3. 遍历第 2 步所得出的索引，通过 Javassist 的 API 回表查找，同时记录该类所有的方法调用信息：
+
+   ```java
+   List<MethodDefinition> methodDefinitions = new ArrayList<>();
+   
+   for (int index : interfaceMethodRefIndices) {
+       ConstPool cp = classFile.getConstPool();
+   
+       MethodDefinition methodDefinition = new MethodDefinition();
+       methodDefinition.setClassName(
+           // 确定 invokeinterface 的接口名
+           cp.getInterfaceMethodrefClassName(index)
+       );
+   
+       methodDefinition.setMethodName(
+           // 通过常量池索引确定方法签名
+           cp.getUtf8Info(
+               // 获取方法签名名的常量池索引
+               cp.getNameAndTypeName(
+                   // 获取方法签名所在的常量池索引
+                   cp.getInterfaceMethodrefNameAndType(index)
+               )
+           )
+       );
+   
+       methodDefinition.setArguments(
+           // 通过常量池索引确定方法名
+           cp.getUtf8Info(
+               cp.getNameAndTypeDescriptor(
+                   cp.getInterfaceMethodrefNameAndType(index)
+               )
+           )
+       );
+   
+       methodDefinitions.add(methodDefinition);
+   }
+   ```
+
+   另提供 MethodDefinition 类供参考（部分内容通过注解省略。源代码并没用 Lombok。）：
+
+   ```java
+   @Data
+   @NoArgsConstructor
+   @AllArgsConstructor
+   public class MethodDefinition {
+       private String className;
+       private String methodName;
+       private String arguments;
+   }
+   ```
+
+   
+
+4. 通过比对调用的方法的类和方法签名来确定是否满足需求。鉴于合符要求的错误码 Logger 的 warn 和 error 调用至少要四个参数，所以只需要确定调用那两个方法的参数个数即可。
+
+   ```java
+   // 确定是否是日志类的方法调用
+   Predicate<MethodDefinition> legacyLoggerClass = x -> x.getClassName().equals("org.apache.dubbo.common.logger.Logger");
+   Predicate<MethodDefinition> errorTypeAwareLoggerClass = x -> x.getClassName().equals("org.apache.dubbo.common.logger.ErrorTypeAwareLogger");
+   Predicate<MethodDefinition> loggerClass = legacyLoggerClass.or(errorTypeAwareLoggerClass);
+   
+   return methodDefinitions.stream()
+       .filter(loggerClass)
+       // 确定是否 warn, error
+       .filter(x -> x.getMethodName().equals("warn") || x.getMethodName().equals("error"))
+       // 若是 warn 和 error 级别则确定参数是否小于四个，如果是则代表没有挂上错误码。
+    .filter(x -> x.getArguments().split(";").length < 4)
+       .collect(Collectors.toList());
+   ```
+
+5. 通过返回的值确定哪些类里头调用了没有错误码的 Logger 调用。
+
 ## 以方法为粒度查找
 
 我们先从调用接口方法的 `invokeinterface` 指令入手，通过比对旁边注释所指的方法名，得出该指令与 Logger 调用有关：
@@ -138,8 +266,6 @@ CONSTANT_InterfaceMethodref_info {
 
 
 > ![P525 - Arguments of invokeinterface (R6.2.8/9)](invokeinterface_args.png)
->
-> <!-- ![image-20240208195123356](image-20240208195123356.png) -->
 >
 > ![P201 - Static constraints of .class file in JVMS (R6.2.8/9)](P201.png)
 
@@ -240,7 +366,7 @@ https://docs.oracle.com/javase/specs/jvms/se19/html/jvms-4.html#jvms-4.10.1.9.in
 
 https://docs.oracle.com/javase/specs/jvms/se19/html/jvms-4.html#jvms-4.9 (Page 201 in the PDF version.)
 
-[4] Java Virtual Machine Specification - Chap. 4 - The 'CONSTANT_Fieldref_info', 'CONSTANT_Methodref_info', and 'CONSTANT_InterfaceMethodref_info' Structures section
+[4] Java Virtual Machine Specification - Chap. 4 - The 'CONSTANT_Fieldref_info', 'CONSTANT_Methodref_info', and 'CONSTANT_InterfaceMethodref_info' Structures and Static Constraints section
 
 https://docs.oracle.com/javase/specs/jvms/se19/html/jvms-4.html#jvms-4.4.2
 
