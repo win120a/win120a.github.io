@@ -1,5 +1,5 @@
 ---
-title: Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（二） - Logger 调用类的判断
+title: Dubbo 在 CI 中自动检查错误码 Logger 调用的实现（二） - 通过 Javassist 完成 Logger 调用类的判断
 date: 2025-03-03
 tags: 
   - Apache Dubbo
@@ -105,7 +105,7 @@ Constant pool:
 
 
 
-### 具体操作
+### 具体思路
 
 鉴于 Logger 的方法是接口方法，在 JVM 中是使用 invokeinterface 调用的。其接受的常量池的结构体是 InterfaceMethodref。从 JVM 规范可知 InterfaceMethodref 的结构如下 <sup>[4]</sup>：
 
@@ -124,6 +124,8 @@ CONSTANT_InterfaceMethodref_info {
 
 
 因此我们只需要确认 .class 文件里头的所有的 CONSTANT_InterfaceMethodref_info 的内容即可。
+
+### Javassist 的实现
 
 我们可以仿照上篇文章的 Javassist 的用法（以下均为org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor#getIllegalLoggerMethodInvocations 这一方法的讲述）：
 
@@ -194,7 +196,7 @@ CONSTANT_InterfaceMethodref_info {
        );
    
        methodDefinition.setMethodName(
-           // 通过常量池索引确定方法签名
+           // 通过常量池索引确定参数名
            cp.getUtf8Info(
                // 获取方法签名名的常量池索引
                cp.getNameAndTypeName(
@@ -253,21 +255,25 @@ CONSTANT_InterfaceMethodref_info {
 
 ## 以方法为粒度查找
 
-我们先从调用接口方法的 `invokeinterface` 指令入手，通过比对旁边注释所指的方法名，得出该指令与 Logger 调用有关：
+### 问题
+
+上述通过判定类常量池的做法虽然可以确定哪个类调用了哪些不符合要求的 Logger 方法调用，但是维护者也需要定位到具体是是哪个方法没有调用到合符要求的 Logger 方法。因此在这里需要以方法为粒度查找 Logger 调用。
+
+### 具体思路
+
+我们先从调用接口方法的 `invokeinterface` 指令入手。我们不妨参考下 JVM 规范中 `invokeinterface` 指令的参数 <sup>[2] [3]</sup>：
+
+![P525 - Arguments of invokeinterface (R6.2.8/9)](invokeinterface_args.png)
+
+![P201 - Static constraints of .class file in JVMS (R6.2.8/9)](P201.png)
+
+
 
 ```java
 35: invokeinterface #16,  5           // InterfaceMethod org/apache/dubbo/common/logger/ErrorTypeAwareLogger.warn:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
 ```
 
 
-
-为了确定决定调用的方法具体是哪个，我们不妨参考下 JVM 规范中 `invokeinterface` 指令的参数 <sup>[2] [3]</sup>：
-
-
-
-> ![P525 - Arguments of invokeinterface (R6.2.8/9)](invokeinterface_args.png)
->
-> ![P201 - Static constraints of .class file in JVMS (R6.2.8/9)](P201.png)
 
 我们可以看到，invokeinterface 的方法的指定是通过常量池中的索引完成方法的完成的。回到上面的输出，我们看到第一项参数的值是 16。因此我们可以找到常量池的第 16 项，即：
 
@@ -338,7 +344,7 @@ CONSTANT_NameAndType_info {
 
    (d) 在 Dubbo CI 运行时使用 Azul OpenJDK 17。
    
-2. 本文写作时的 JDK 的最新版本为 21，本文所有的有关 JDK 的参考文献均以该版本为参考。
+2. 本文写作时的 JDK 的最新版本为 ~~21~~  （本文初稿时）23（重新整理时），本文所有的有关 JDK 的参考文献均以该版本为参考。
 
 
 
@@ -356,19 +362,19 @@ CONSTANT_NameAndType_info {
 
 [1]  Java Virtual Machine Specification - Chap. 4 - Constant Pool section
 
-https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-4.html#jvms-4.4
+https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.4
 
 [2] Java Virtual Machine Specification - Chap. 4 - invokeinterface section
 
-https://docs.oracle.com/javase/specs/jvms/se19/html/jvms-4.html#jvms-4.10.1.9.invokeinterface (Page 525 in the PDF version.)
+https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.10.1.9.invokeinterface (Page 525 in the PDF version.)
 
 [3]  Java Virtual Machine Specification - Chap. 4 - Constraints on Java Virtual Machine Code section
 
-https://docs.oracle.com/javase/specs/jvms/se19/html/jvms-4.html#jvms-4.9 (Page 201 in the PDF version.)
+https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.9 (Page 201 in the PDF version.)
 
 [4] Java Virtual Machine Specification - Chap. 4 - The 'CONSTANT_Fieldref_info', 'CONSTANT_Methodref_info', and 'CONSTANT_InterfaceMethodref_info' Structures and Static Constraints section
 
-https://docs.oracle.com/javase/specs/jvms/se19/html/jvms-4.html#jvms-4.4.2
+https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.4.2
 
 [5] Apache Dubbo Source Code - org.apache.dubbo.registry.support.CacheableFailbackRegistry (error code was not managed in this version)
 
