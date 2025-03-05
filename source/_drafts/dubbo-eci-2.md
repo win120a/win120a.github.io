@@ -20,7 +20,7 @@ tags:
 
 ## Javap 的输出
 
-此文仍以上篇文章的`org.apache.dubbo.common.DeprecatedMethodInvocationCounter.onDeprecatedMethodCalled(String)` 的输出的节选为例。<small>该类在最近在 Dubbo 的主线被删除，请参考参考链接 <sup>[2]</sup> 中的文件</small>）：
+此文仍以上篇文章的`org.apache.dubbo.common.DeprecatedMethodInvocationCounter.onDeprecatedMethodCalled(String)` 的输出的节选为例。<small>该类在最近在 Dubbo 的主线被删除，请参考参考链接 <sup>[1]</sup> 中的文件</small>）：
 
 ```java
 public final class org.apache.dubbo.common.DeprecatedMethodInvocationCounter
@@ -95,7 +95,7 @@ Constant pool:
 
 考虑到错误码 Logger 的接入是以整个类为单位的，我们可以简化成只扫描这个类是否使用了错误码 Logger 类。
 
-据 Java 虚拟机规范 <sup>[1]</sup>：
+据 Java 虚拟机规范 <sup>[2]</sup>：
 
 > Java Virtual Machine instructions do not rely on the run-time layout of classes, interfaces, class instances, or arrays. Instead, instructions refer to symbolic information in the `constant_pool` table.
 
@@ -107,7 +107,7 @@ Constant pool:
 
 ### 具体思路
 
-鉴于 Logger 的方法是接口方法，在 JVM 中是使用 invokeinterface 调用的。其接受的常量池的结构体是 InterfaceMethodref。从 JVM 规范可知 InterfaceMethodref 的结构如下 <sup>[4]</sup>：
+鉴于 Logger 的方法是接口方法，在 JVM 中是使用 invokeinterface 调用的。其接受的常量池的结构体是 InterfaceMethodref。从 JVM 规范可知 InterfaceMethodref 的结构如下 <sup>[3]</sup>：
 
 ```java
 CONSTANT_InterfaceMethodref_info {
@@ -127,7 +127,7 @@ CONSTANT_InterfaceMethodref_info {
 
 ### Javassist 的实现
 
-我们可以仿照上篇文章的 Javassist 的用法（以下均为org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor#getIllegalLoggerMethodInvocations 这一方法的讲述）：
+我们可以仿照上篇文章的 Javassist 的用法（以下均为org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor#getIllegalLoggerMethodInvocations 这一方法的讲述）<sup>[4]</sup>：
 
 1. 首先找到 CONSTANT_InterfaceMethodref_info 在 Javassist 中对应的类 javassist.bytecode.InterfaceMethodrefInfo
 
@@ -142,7 +142,7 @@ CONSTANT_InterfaceMethodref_info {
        }
    }).map(this::getIndexFieldInConstPoolItems).collect(Collectors.toList());
    ```
-另附 `getIndexFieldInConstPoolItems` 和 `ReflectUtils.getDeclaredFieldRecursively` 的代码：
+另附 `getIndexFieldInConstPoolItems` 和 `ReflectUtils.getDeclaredFieldRecursively`<sup> [5]</sup> 的代码：
    ```java
    // 为了查找出 Javassist 对应的常量池类实例的 index 的 Field，以确定其在常量池的索引。
    private int getIndexFieldInConstPoolItems(Object item) {
@@ -219,7 +219,7 @@ CONSTANT_InterfaceMethodref_info {
    }
    ```
 
-   另提供 MethodDefinition 类供参考（部分内容通过注解省略。源代码并没用 Lombok。）：
+   另提供 MethodDefinition 类供参考（部分内容通过注解省略。源代码并没用 Lombok。）<sup>[6]</sup>：
 
    ```java
    @Data
@@ -261,71 +261,143 @@ CONSTANT_InterfaceMethodref_info {
 
 ### 具体思路
 
-我们先从调用接口方法的 `invokeinterface` 指令入手。我们不妨参考下 JVM 规范中 `invokeinterface` 指令的参数 <sup>[2] [3]</sup>：
-
-![P525 - Arguments of invokeinterface (R6.2.8/9)](invokeinterface_args.png)
-
-![P201 - Static constraints of .class file in JVMS (R6.2.8/9)](P201.png)
-
-
+首先我们需要遍历所有方法（通过 `ClassFile.getMethods()`），并确定 .class 文件中每个方法的具体代码的位置。据 JVM 规范 <sup>[7]</sup>，`.class` 文件中，方法的具体实现是存放到每个方法的属性表中的 Code 属性，所以在 Javassist 中应使用 Class File API 获取每个方法的 Code 属性（即 `getCodeAttribute()`），因此有：
 
 ```java
-35: invokeinterface #16,  5           // InterfaceMethod org/apache/dubbo/common/logger/ErrorTypeAwareLogger.warn:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
-```
+ClassFile classFile = JavassistUtils.openClassFile("...");
+ConstPool cp = classFile.getConstPool();
 
-
-
-我们可以看到，invokeinterface 的方法的指定是通过常量池中的索引完成方法的完成的。回到上面的输出，我们看到第一项参数的值是 16。因此我们可以找到常量池的第 16 项，即：
-
-```java
-#16 = InterfaceMethodref #102.#103     // org/apache/dubbo/common/logger/ErrorTypeAwareLogger.warn:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
-```
-
-
-鉴于 InterfaceMethodRef 的参数引用的是常量池的 102 号和 103 号，在此节选内容如下：
-
-```java
-#102 = Class              #144          // org/apache/dubbo/common/logger/ErrorTypeAwareLogger
-#103 = NameAndType        #145:#146     // warn:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
-```
-
-
-不难看出：
-
-1. 102 项是对应方法所在接口的名字。
-2. 103 项是方法签名（JVM 的表示）。
-
-参考`CONSTANT_Class_info` （即 Class）和`CONSTANT_NameAndType_info` （即 NameAndType）的结构：
-
-```
-CONSTANT_Class_info {
-    u1 tag;
-    u2 name_index;
+for (MethodInfo methodInfo : classFile.getMethods()) {
+    CodeAttribute codeAttribute = methodInfo.getCodeAttribute();
+    
+    if (codeAttribute == null) {
+        // 没有具体实现（抽象方法等），跳过。
+        continue;
+    }
+    
+    // ...
 }
 ```
 
+
+
+拿到 Code 属性之后，遍历每条指令，直到 `invokeinterface` 出现为止，故有：
+
 ```java
-CONSTANT_NameAndType_info {
-    u1 tag;
-    u2 name_index;
-    u2 descriptor_index;
+ClassFile classFile = JavassistUtils.openClassFile("...");
+ConstPool cp = classFile.getConstPool();
+
+for (MethodInfo methodInfo : classFile.getMethods()) {
+    CodeAttribute codeAttribute = methodInfo.getCodeAttribute();
+    
+    if (codeAttribute == null) {
+        // 没有具体实现（抽象方法等），跳过。
+        continue;
+    }
+    
+    CodeIterator codeIterator = codeAttribute.iterator();
+
+    while (codeIterator.hasNext()) {
+        // 获取下一条指令的索引
+        int index = codeIterator.next();
+        // 确定具体指令
+        int op = codeIterator.byteAt(index);
+        
+        if ("invokeinterface".equals(Mnemonic.OPCODE[op])) {
+
+            // 当指令是 invokeinterface，...
+        }
+    }
 }
 ```
 
-1. `name_index` 是对应着常量池中类名或方法名的索引，即第 144、145 项。
-2. `CONSTANT_NameAndType_info `中的 `descriptor_index` 对应着方法的参数类型的索引，即第 146 项。
+
+
+为了进一步确定接下来的行为，我们不妨参考下 JVM 规范中 `invokeinterface` 指令的参数 <sup>[8]</sup>：
+
+![P525 - Arguments of invokeinterface (R7.3.5)](invokeinterface_args.png)
+
+不难看出调用的接口方法的方法签名（即 `CONSTANT_InterfaceMethodref_info`）的常量池索引是 `(indexbyte1 << 8) | indexbyte2` 这一表达式的结果。故有：
+
+```java
+// 前略。
+if ("invokeinterface".equals(Mnemonic.OPCODE[op])) {
+    // Indexbyte part of invokeinterface opcode.
+
+    int interfaceMethodConstPoolIndex =
+        codeIterator.byteAt(index + 1) << 8 | codeIterator.byteAt(index + 2);
+}
+```
+
+再依照上述（以类为粒度的查找）的办法拿到具体方法签名，并做好记录，做好记录全部实现如下：
+
+```java
+ClassFile classFile = JavassistUtils.openClassFile("...");
+
+ConstPool cp = classFile.getConstPool();
+
+Map<String, List<MethodDefinition>> methodDefinitions = new HashMap<>();
+
+for (MethodInfo methodInfo : classFile.getMethods()) {
+    CodeAttribute codeAttribute = methodInfo.getCodeAttribute();
+
+    if (codeAttribute == null) {
+        // No detailed implementation, just skip!
+        continue;
+    }
+
+    CodeIterator codeIterator = codeAttribute.iterator();
+
+    while (codeIterator.hasNext()) {
+        int index = codeIterator.next();
+        int op = codeIterator.byteAt(index);
+
+        if ("invokeinterface".equals(Mnemonic.OPCODE[op])) {
+
+            // IndexByte part of invokeinterface opcode.
+
+            int interfaceMethodConstPoolIndex =
+                codeIterator.byteAt(index + 1) << 8 | codeIterator.byteAt(index + 2);
+
+            String initiateMethodName = methodInfo.toString();
+
+            MethodDefinition methodDefinition = new MethodDefinition();
+
+            methodDefinition.setClassName(
+                cp.getInterfaceMethodrefClassName(interfaceMethodConstPoolIndex)
+            );
+
+            methodDefinition.setMethodName(
+                cp.getUtf8Info(
+                    cp.getNameAndTypeName(
+                        cp.getInterfaceMethodrefNameAndType(interfaceMethodConstPoolIndex)
+                    )
+                )
+            );
+
+            methodDefinition.setArguments(
+                cp.getUtf8Info(
+                    cp.getNameAndTypeDescriptor(
+                        cp.getInterfaceMethodrefNameAndType(interfaceMethodConstPoolIndex)
+                    )
+                )
+            );
+
+            methodDefinitions.computeIfAbsent(initiateMethodName, k -> new ArrayList<>());
+            methodDefinitions.get(initiateMethodName).add(methodDefinition);
+        }
+    }
+}
+
+// 对于此处的 methodDefinitions：
+// Key 是这个 .class 文件中的方法，Value 是这个方法发起的所有调用。
+```
+
+若要筛选出不合格的 Logger 方法调用，只需要筛选 methodDefinitions 这一结果，或在遍历方法调用指令之时完成筛选即可。
 
 
 
-再顺着 Class 和 NameAndType 的旁边的索引（即 `144, 145, 146` 项）找出对应的常量池项目：
-
-  ```
-#144 = Utf8               org/apache/dubbo/common/logger/ErrorTypeAwareLogger
-#145 = Utf8               warn
-#146 = Utf8           (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
-  ```
-
-由此便可拿到这个类调用了哪些方法。
+以上解决了如何获取所有的 Logger 方法的调用的问题。但是，一个新需求到来 —— 确定不合格的 Logger 调用所在的行号。该怎么办呢？还请看下回分解。
 
 
 
@@ -360,33 +432,49 @@ CONSTANT_NameAndType_info {
 </style>
 <small>
 
-[1]  Java Virtual Machine Specification - Chap. 4 - Constant Pool section
+[1] Apache Dubbo Source Code - org.apache.dubbo.common.DeprecatedMethodInvocationCounter
+
+https://github.com/apache/dubbo/blob/5ae875d951d354a2f2d3316fc08cab406a3e947e/dubbo-common/src/main/java/org/apache/dubbo/common/DeprecatedMethodInvocationCounter.java
+
+[2]  Java Virtual Machine Specification - Chap. 4 - Constant Pool section
 
 https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.4
 
-[2] Java Virtual Machine Specification - Chap. 4 - invokeinterface section
+[3] Java Virtual Machine Specification - Chap. 4 - The 'CONSTANT_Fieldref_info', 'CONSTANT_Methodref_info', and 'CONSTANT_InterfaceMethodref_info' Structures and Static Constraints section
+
+https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.4.2
+
+[4] Apache Dubbo Error Code Inspector Source Code (in dubbo-test-tools) - org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor
+
+https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/extractor/JavassistConstantPoolErrorCodeExtractor.java
+
+[5] Apache Dubbo Error Code Inspector Source Code (in dubbo-test-tools) - org.apache.dubbo.errorcode.util.ReflectUtils
+
+https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/util/ReflectUtils.java
+
+[6] Apache Dubbo Error Code Inspector Source Code (in dubbo-test-tools) - org.apache.dubbo.errorcode.model.MethodDefinition
+
+https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/model/MethodDefinition.java
+
+[7] Java Virtual Machine Specification - Chap. 4 - The Code Attribute section
+
+https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.7.3
+
+[8] Java Virtual Machine Specification - Chap. 4 - invokeinterface section
 
 https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.10.1.9.invokeinterface (Page 525 in the PDF version.)
+
+
 
 [3]  Java Virtual Machine Specification - Chap. 4 - Constraints on Java Virtual Machine Code section
 
 https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.9 (Page 201 in the PDF version.)
 
-[4] Java Virtual Machine Specification - Chap. 4 - The 'CONSTANT_Fieldref_info', 'CONSTANT_Methodref_info', and 'CONSTANT_InterfaceMethodref_info' Structures and Static Constraints section
-
-https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.4.2
-
-[5] Apache Dubbo Source Code - org.apache.dubbo.registry.support.CacheableFailbackRegistry (error code was not managed in this version)
-
-https://github.com/apache/dubbo/blob/7359a98fdd0ff274f50b0f6561d249d133d0f2fb/dubbo-registry/dubbo-registry-api/src/main/java/org/apache/dubbo/registry/support/CacheableFailbackRegistry.java
-
 [6] Javassist Tutorial
 
 http://www.javassist.org/tutorial/tutorial3.html#intro
 
-[7] Apache Dubbo Error Code Inspector Source Code (in dubbo-test-tools) - org.apache.dubbo.errorcode.extractor.JavassistUtils
 
-https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/extractor/JavassistUtils.java
 
 [8] Javassist API Docs - javassist.bytecode.ClassFile#getConstPool()
 
@@ -394,9 +482,7 @@ https://www.javassist.org/html/javassist/bytecode/ClassFile.html#getConstPool()
 
 
 
-[9]  Apache Dubbo Error Code Inspector Source Code (in dubbo-test-tools) - org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor
 
-https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/src/main/java/org/apache/dubbo/errorcode/extractor/JavassistConstantPoolErrorCodeExtractor.java
 
 </small>
 
