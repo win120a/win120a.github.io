@@ -107,7 +107,7 @@ Constant pool:
 
 ### 具体思路
 
-鉴于 Logger 的方法是接口方法，在 JVM 中是使用 invokeinterface 调用的。其接受的常量池的结构体是 InterfaceMethodref。从 JVM 规范可知 InterfaceMethodref 的结构如下 <sup>[3]</sup>：
+鉴于 Logger 的方法是接口方法，在 JVM 中是使用 `invokeinterface` 调用的。其接受的常量池的结构体是 `InterfaceMethodref`。从 JVM 规范可知 `InterfaceMethodref` 的结构如下 <sup>[3]</sup>：
 
 ```java
 CONSTANT_InterfaceMethodref_info {
@@ -123,11 +123,11 @@ CONSTANT_InterfaceMethodref_info {
 
 
 
-因此我们只需要确认 .class 文件里头的所有的 CONSTANT_InterfaceMethodref_info 的内容即可。
+因此我们只需要确认 .class 文件里头的所有的 `CONSTANT_InterfaceMethodref_info` 的内容即可。
 
 ### Javassist 的实现
 
-我们可以仿照上篇文章的 Javassist 的用法（以下均为org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor#getIllegalLoggerMethodInvocations 这一方法的讲述）<sup>[4]</sup>：
+我们可以仿照上篇文章的 Javassist 的用法（以下均为`org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor#getIllegalLoggerMethodInvocations` 这一方法的讲述）<sup>[4]</sup>：
 
 1. 首先找到 CONSTANT_InterfaceMethodref_info 在 Javassist 中对应的类 javassist.bytecode.InterfaceMethodrefInfo
 
@@ -261,6 +261,8 @@ CONSTANT_InterfaceMethodref_info {
 
 ### 具体思路
 
+#### 遍历方法
+
 首先我们需要遍历所有方法（通过 `ClassFile.getMethods()`），并确定 .class 文件中每个方法的具体代码的位置。据 JVM 规范 <sup>[7]</sup>，`.class` 文件中，方法的具体实现是存放到每个方法的属性表中的 Code 属性，所以在 Javassist 中应使用 Class File API 获取每个方法的 Code 属性（即 `getCodeAttribute()`），因此有：
 
 ```java
@@ -279,9 +281,33 @@ for (MethodInfo methodInfo : classFile.getMethods()) {
 }
 ```
 
+拿到 Code 属性之后，遍历每条指令，直到 `invokeinterface` 出现就开始比对。
+
+那么怎么遍历每条指令呢？
 
 
-拿到 Code 属性之后，遍历每条指令，直到 `invokeinterface` 出现为止，故有：
+
+#### Javassist 的方法的字节码指令的遍历 API
+
+这个时候我们可以使用 `CodeIterator` 来遍历每一条字节码，而这个对象可以通过 `CodeAttribute.iterator()` 获取。
+
+CodeIterator 的用法与迭代器 Iterator 相似（但不是 Iterator 的实现类），都是使用 `hasNext` 方法确定是否还有字节码，`next` 方法拿到下一个字节码指令的字节相对于 Code 属性表最开始的指令的偏移量。`byteAt` 方法可以拿到偏移量所在位置对应的字节。
+
+> 题外话：为什么是 Code 表的偏移量？
+>
+> ![Code of creating CodeIterator (R7.3.9)](codeIteator-1.png)
+>
+> ![Part of implementation of CodeIterator (R7.3.9)](codeIteator-2.png)
+>
+> 1. 在 `.class` 文件中，Code 是方法的属性。
+> 2. 在获取 CodeIterator 的 `CodeAttribute.iterator()` 中，调用了 CodeIterator 的构造方法，这个构造方法获取了 CodeAttribute 的 info （即 Code 属性表的原始字节码），并赋值给 byteCode
+> 3. 通过 byteAt 方法可知它读取了 byteCode 数组，下标是给定的 index，因此可以看出 index 是相对于 Code 表的偏移量，而非相对于字节码文件的偏移量。
+
+在 Javassist 中有一个数组可以用来对应指令名称和指令的字节码的表示，为 `Mnemonic.OPCODE` 。我们可以用它比对指令的名称。<sup>[8]</sup>
+
+鉴于抽象方法没有 Code 属性表 <sup>[7]</sup>，因此需要通过判断排除这类方法以防 NPE。
+
+整合上述思路并用代码表示，如下：
 
 ```java
 ClassFile classFile = JavassistUtils.openClassFile("...");
@@ -303,6 +329,9 @@ for (MethodInfo methodInfo : classFile.getMethods()) {
         // 确定具体指令
         int op = codeIterator.byteAt(index);
         
+        // 此处可以使用
+        // op == 185
+        // 来提高效率（直接比较它对应的指令字节）
         if ("invokeinterface".equals(Mnemonic.OPCODE[op])) {
 
             // 当指令是 invokeinterface，...
@@ -313,11 +342,13 @@ for (MethodInfo methodInfo : classFile.getMethods()) {
 
 
 
-为了进一步确定接下来的行为，我们不妨参考下 JVM 规范中 `invokeinterface` 指令的参数 <sup>[8]</sup>：
+#### Invokeinterface 的具体参数的获得
+
+为了进一步确定接下来的行为，我们不妨参考下 JVM 规范中 `invokeinterface` 指令的参数 <sup>[9]</sup>：
 
 ![P525 - Arguments of invokeinterface (R7.3.5)](invokeinterface_args.png)
 
-不难看出调用的接口方法的方法签名（即 `CONSTANT_InterfaceMethodref_info`）的常量池索引是 `(indexbyte1 << 8) | indexbyte2` 这一表达式的结果。故有：
+不难看出调用的接口方法的方法签名（即 `CONSTANT_InterfaceMethodref_info`）的常量池索引是 `(indexbyte1 << 8) | indexbyte2` 这一表达式的结果。且 indexbyte1 就在代表 invokeinterface 这一指令的下一个字节。故有：
 
 ```java
 // 前略。
@@ -329,7 +360,7 @@ if ("invokeinterface".equals(Mnemonic.OPCODE[op])) {
 }
 ```
 
-再依照上述（以类为粒度的查找）的办法拿到具体方法签名，并做好记录，做好记录全部实现如下：
+再依照上述（以类为粒度的查找）的办法拿到具体方法签名，并通过 `MethodInfo.toString()` （或者 `MethodInfo.getName()`  和 `MethodInfo.getDescriptor()`）获取发起调用的方法的签名，再做好记录，做好记录全部实现如下：
 
 ```java
 ClassFile classFile = JavassistUtils.openClassFile("...");
@@ -408,7 +439,7 @@ for (MethodInfo methodInfo : classFile.getMethods()) {
 
 1. 有关环境：
 
-   (a) 命令行 Maven 运行于 OpenJDK 19 环境下。
+   (a) 命令行 Maven 运行于 OpenJDK ~~19~~ （本文初稿时）22（重新整理时）环境下。
 
    (b) 对于 Dubbo 项目 IDEA JDK 配置为基于 OpenJDK 8 的 GraalVM 21.3.1 的 JDK。
 
@@ -460,29 +491,13 @@ https://github.com/apache/dubbo-test-tools/blob/main/dubbo-error-code-inspector/
 
 https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.7.3
 
-[8] Java Virtual Machine Specification - Chap. 4 - invokeinterface section
+[8] Javassist API Docs - javassist.bytecode.Mnemonic
+
+https://www.javassist.org/html/javassist/bytecode/Mnemonic.html
+
+[9] Java Virtual Machine Specification - Chap. 4 - invokeinterface section
 
 https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.10.1.9.invokeinterface (Page 525 in the PDF version.)
-
-
-
-[3]  Java Virtual Machine Specification - Chap. 4 - Constraints on Java Virtual Machine Code section
-
-https://docs.oracle.com/javase/specs/jvms/se23/html/jvms-4.html#jvms-4.9 (Page 201 in the PDF version.)
-
-[6] Javassist Tutorial
-
-http://www.javassist.org/tutorial/tutorial3.html#intro
-
-
-
-[8] Javassist API Docs - javassist.bytecode.ClassFile#getConstPool()
-
-https://www.javassist.org/html/javassist/bytecode/ClassFile.html#getConstPool()
-
-
-
-
 
 </small>
 
