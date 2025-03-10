@@ -8,7 +8,7 @@ on:
 jobs:
   pages:
     runs-on: ubuntu-latest
-    if: github.repository_owner == 'win120a' && github.ref == 'refs/heads/master' # only perform on latest master
+    if: github.repository == 'win120a/win120a.github.io' # only perform on latest master
     steps:
       - uses: actions/checkout@v3
 
