@@ -129,9 +129,9 @@ CONSTANT_InterfaceMethodref_info {
 
 我们可以仿照上篇文章的 Javassist 的用法（以下均为`org.apache.dubbo.errorcode.extractor.JavassistConstantPoolErrorCodeExtractor#getIllegalLoggerMethodInvocations` 这一方法的讲述）<sup>[4]</sup>：
 
-1. 首先找到 CONSTANT_InterfaceMethodref_info 在 Javassist 中对应的类 javassist.bytecode.InterfaceMethodrefInfo
+1. 首先找到 `CONSTANT_InterfaceMethodref_info` 在 Javassist 中对应的类 `javassist.bytecode.InterfaceMethodrefInfo`
 
-2. 通过反射获得所有的常量池的内容，并通过 Stream 筛选和 map 出所有的 InterfaceMethodrefInfo 的实例所对应的常量池索引：
+2. 通过反射获得所有的常量池的内容，并通过 Stream 筛选和 map 出所有的 `InterfaceMethodrefInfo` 的实例所对应的常量池索引：
    ```java
    List<Integer> interfaceMethodRefIndices = constPoolItems.stream().filter(x -> {
        try {
@@ -181,7 +181,7 @@ CONSTANT_InterfaceMethodref_info {
    ```
 
 
-3. 遍历第 2 步所得出的索引，通过 Javassist 的 API 回表查找，同时记录该类所有的方法调用信息：
+3. 遍历第 2 步所得出的索引，通过 Javassist 的常量池 API 回表查找，同时记录该类所有的方法调用信息：
 
    ```java
    List<MethodDefinition> methodDefinitions = new ArrayList<>();
@@ -300,10 +300,10 @@ CodeIterator 的用法与迭代器 Iterator 相似（但不是 Iterator 的实�
 > ![Part of implementation of CodeIterator (R7.3.9)](codeIteator-2.png)
 >
 > 1. 在 `.class` 文件中，Code 是方法的属性。
-> 2. 在获取 CodeIterator 的 `CodeAttribute.iterator()` 中，调用了 CodeIterator 的构造方法，这个构造方法获取了 CodeAttribute 的 info （即 Code 属性表的原始字节码），并赋值给 byteCode
+> 2. 在获取 CodeIterator 的 `CodeAttribute.iterator()` 中，调用了 CodeIterator 的构造方法，这个构造方法获取了 CodeAttribute 的 `info` 这一 Field （即 Code 属性表的原始字节码），并赋值给 `CodeIterator.byteCode` 属性。
 > 3. 通过 byteAt 方法可知它读取了 byteCode 数组，下标是给定的 index，因此可以看出 index 是相对于 Code 表的偏移量，而非相对于字节码文件的偏移量。
 
-在 Javassist 中有一个数组可以用来对应指令名称和指令的字节码的表示，为 `Mnemonic.OPCODE` 。我们可以用它比对指令的名称。<sup>[8]</sup>
+在 Javassist 中有一个数组可以用来对应指令名称和指令的字节码的表示，为 `Mnemonic.OPCODE` 。我们可以用它比对指令的名称。<sup>[8]</sup> （此处也可以通过直接比对具体指令的字节以提高效率。）
 
 鉴于抽象方法没有 Code 属性表 <sup>[7]</sup>，因此需要通过判断排除这类方法以防 NPE。
 
