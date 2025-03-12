@@ -131,18 +131,32 @@ CONSTANT_InterfaceMethodref_info {
 
 1. 首先找到 `CONSTANT_InterfaceMethodref_info` 在 Javassist 中对应的类 `javassist.bytecode.InterfaceMethodrefInfo`
 
-2. 通过反射获得所有的常量池的内容，并通过 Stream 筛选和 map 出所有的 `InterfaceMethodrefInfo` 的实例所对应的常量池索引：
+2. 通过反射调用 `ConstPool.getItem(int)` 获得所有的常量池的内容（详见前一篇文章的 `JavassistUtils.getConstPoolItems`），并通过 Stream 筛选和 map 出所有的 `InterfaceMethodrefInfo` 的实例所对应的常量池索引：
    ```java
-   List<Integer> interfaceMethodRefIndices = constPoolItems.stream().filter(x -> {
+   private static final Class INTERFACE_METHOD_INFO;
+   
+   static {
        try {
-           if (x == null) return false;
-           return x.getClass() == Class.forName("javassist.bytecode.InterfaceMethodrefInfo");
+           INTERFACE_METHOD_INFO = Class.forName("javassist.bytecode.InterfaceMethodrefInfo");
        } catch (ClassNotFoundException e) {
-           return false;
+           throw new RuntimeException(e);
        }
-   }).map(this::getIndexFieldInConstPoolItems).collect(Collectors.toList());
+   }
+
+   // ...
+   
+   public List<MethodDefinition> getIllegalLoggerMethodInvocations(String classFilePath) {
+       List<Object> constPoolItems = JavassistUtils.getConstPoolItems(classFile.getConstPool());
+   
+       List<Integer> interfaceMethodRefIndices = constPoolItems.stream()
+           .filter(x -> x.getClass() == INTERFACE_METHOD_INFO)
+           .map(this::getIndexFieldInConstPoolItems)
+           .collect(Collectors.toList());
+       
+       // ...
+   }
    ```
-另附 `getIndexFieldInConstPoolItems` 和 `ReflectUtils.getDeclaredFieldRecursively`<sup> [5]</sup> 的代码：
+   另附 `getIndexFieldInConstPoolItems` 和 `ReflectUtils.getDeclaredFieldRecursively`<sup> [5]</sup> 的代码：
    ```java
    // 为了查找出 Javassist 对应的常量池类实例的 index 的 Field，以确定其在常量池的索引。
    private int getIndexFieldInConstPoolItems(Object item) {
@@ -159,7 +173,7 @@ CONSTANT_InterfaceMethodref_info {
    }
    ```
    
-   ```java
+```java
    public static Field getDeclaredFieldRecursively(Class cls, String name) {
        try {
            // 本类找得到么？
@@ -173,7 +187,7 @@ CONSTANT_InterfaceMethodref_info {
                // null 了事。
                return null;
            }
-
+   
            // 向上找。
            return getDeclaredFieldRecursively(cls.getSuperclass(), name);
        }
@@ -184,6 +198,8 @@ CONSTANT_InterfaceMethodref_info {
 3. 遍历第 2 步所得出的索引，通过 Javassist 的常量池 API 回表查找，同时记录该类所有的方法调用信息：
 
    ```java
+   // 接上文 getIllegalLoggerMethodInvocations
+   
    List<MethodDefinition> methodDefinitions = new ArrayList<>();
    
    for (int index : interfaceMethodRefIndices) {
@@ -237,6 +253,8 @@ CONSTANT_InterfaceMethodref_info {
 4. 通过比对调用的方法的类和方法签名来确定是否满足需求。鉴于合符要求的错误码 Logger 的 warn 和 error 调用至少要四个参数，所以只需要确定调用那两个方法的参数个数即可。
 
    ```java
+   // 接上文 getIllegalLoggerMethodInvocations
+   
    // 确定是否是日志类的方法调用
    Predicate<MethodDefinition> legacyLoggerClass = x -> x.getClassName().equals("org.apache.dubbo.common.logger.Logger");
    Predicate<MethodDefinition> errorTypeAwareLoggerClass = x -> x.getClassName().equals("org.apache.dubbo.common.logger.ErrorTypeAwareLogger");
@@ -247,7 +265,7 @@ CONSTANT_InterfaceMethodref_info {
        // 确定是否 warn, error
        .filter(x -> x.getMethodName().equals("warn") || x.getMethodName().equals("error"))
        // 若是 warn 和 error 级别则确定参数是否小于四个，如果是则代表没有挂上错误码。
-    .filter(x -> x.getArguments().split(";").length < 4)
+       .filter(x -> x.getArguments().split(";").length < 4)
        .collect(Collectors.toList());
    ```
 
@@ -348,7 +366,7 @@ for (MethodInfo methodInfo : classFile.getMethods()) {
 
 ![P525 - Arguments of invokeinterface (R7.3.5)](invokeinterface_args.png)
 
-不难看出调用的接口方法的方法签名（即 `CONSTANT_InterfaceMethodref_info`）的常量池索引是 `(indexbyte1 << 8) | indexbyte2` 这一表达式的结果。且 indexbyte1 就在代表 invokeinterface 这一指令的下一个字节。故有：
+不难看出调用的接口方法的方法签名（即 `CONSTANT_InterfaceMethodref_info`）的常量池索引是 `(indexbyte1 << 8) | indexbyte2` 这一表达式的结果。且 indexbyte1 就在 invokeinterface 这一指令的字节码的下一个字节。故有：
 
 ```java
 // 前略。
@@ -360,7 +378,7 @@ if ("invokeinterface".equals(Mnemonic.OPCODE[op])) {
 }
 ```
 
-再依照上述（以类为粒度的查找）的办法拿到具体方法签名，并通过 `MethodInfo.toString()` （或者 `MethodInfo.getName()`  和 `MethodInfo.getDescriptor()`）获取发起调用的方法的签名，再做好记录，做好记录全部实现如下：
+再依照“以类为粒度的查找”一节的办法拿到具体方法签名，并通过 `MethodInfo.toString()` （或者 `MethodInfo.getName()`  和 `MethodInfo.getDescriptor()`）获取发起调用的方法的签名，再做好记录，做好记录全部实现如下：
 
 ```java
 ClassFile classFile = JavassistUtils.openClassFile("...");
