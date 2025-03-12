@@ -91,7 +91,7 @@ Constant pool:
 
 
 
-## 以类为粒度查找
+## 以常量池为切入点查找
 
 考虑到错误码 Logger 的接入是以整个类为单位的，我们可以简化成只扫描这个类是否使用了错误码 Logger 类。
 
@@ -271,11 +271,11 @@ CONSTANT_InterfaceMethodref_info {
 
 5. 通过返回的值确定哪些类里头调用了没有错误码的 Logger 调用。
 
-## 以方法为粒度查找
+## 以方法调用为切入点查找
 
 ### 问题
 
-上述通过判定类常量池的做法虽然可以确定哪个类调用了哪些不符合要求的 Logger 方法调用，但是维护者也需要定位到具体是是哪个方法没有调用到合符要求的 Logger 方法。因此在这里需要以方法为粒度查找 Logger 调用。
+上述通过判定类常量池的做法虽然可以确定哪个类调用了哪些不符合要求的 Logger 方法调用，但是维护者也需要定位到具体是是哪个方法没有调用到合符要求的 Logger 方法。因此在这里需要以方法调用为切入点查找 Logger 调用。
 
 ### 具体思路
 
@@ -378,7 +378,7 @@ if ("invokeinterface".equals(Mnemonic.OPCODE[op])) {
 }
 ```
 
-再依照“以类为粒度的查找”一节的办法拿到具体方法签名，并通过 `MethodInfo.toString()` （或者 `MethodInfo.getName()`  和 `MethodInfo.getDescriptor()`）获取发起调用的方法的签名，再做好记录，做好记录全部实现如下：
+再依照“以类为粒度的查找”一节的办法拿到具体方法签名，并通过 `MethodInfo.toString()` （或者 `MethodInfo.getName()`  和  `MethodInfo.getDescriptor()`）获取发起调用的方法的签名，再做好记录，做好记录全部实现如下：
 
 ```java
 ClassFile classFile = JavassistUtils.openClassFile("...");
