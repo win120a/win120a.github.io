@@ -378,7 +378,7 @@ if ("invokeinterface".equals(Mnemonic.OPCODE[op])) {
 }
 ```
 
-再依照“以类为粒度的查找”一节的办法拿到具体方法签名，并通过 `MethodInfo.toString()` （或者 `MethodInfo.getName()`  和  `MethodInfo.getDescriptor()`）获取发起调用的方法的签名，再做好记录，做好记录全部实现如下：
+再依照“以常量池为切入点查找”一节的办法拿到具体方法签名，并通过 `MethodInfo.toString()` （或者 `MethodInfo.getName()`  和  `MethodInfo.getDescriptor()`）获取发起调用的方法的签名，再做好记录，做好记录全部实现如下：
 
 ```java
 ClassFile classFile = JavassistUtils.openClassFile("...");
