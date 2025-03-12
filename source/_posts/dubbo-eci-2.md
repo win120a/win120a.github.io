@@ -193,7 +193,7 @@ CONSTANT_InterfaceMethodref_info {
            return getDeclaredFieldRecursively(cls.getSuperclass(), name);
        }
    }
-   ```
+```
 
 
 3. 遍历第 2 步所得出的索引，通过 Javassist 的常量池 API 回表查找，同时记录该类所有的方法调用信息：
@@ -314,9 +314,9 @@ CodeIterator 的用法与迭代器 Iterator 相似（但不是 Iterator 的实�
 
 > 题外话：为什么是 Code 表的偏移量？
 >
-> ![Code of creating CodeIterator (R7.3.9)](codeIteator-1.png)
+> ![Code of creating CodeIterator (R7.3.9)](codeIterator-1.png)
 >
-> ![Part of implementation of CodeIterator (R7.3.9)](codeIteator-2.png)
+> ![Part of implementation of CodeIterator (R7.3.9)](codeIterator-2.png)
 >
 > 1. 在 `.class` 文件中，Code 是方法的属性。
 > 2. 在获取 CodeIterator 的 `CodeAttribute.iterator()` 中，调用了 CodeIterator 的构造方法，这个构造方法获取了 CodeAttribute 的 `info` 这一 Field （即 Code 属性表的原始字节码），并赋值给 `CodeIterator.byteCode` 属性。
